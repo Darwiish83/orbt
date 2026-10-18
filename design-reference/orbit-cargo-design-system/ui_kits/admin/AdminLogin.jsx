@@ -1,0 +1,31 @@
+var { Button, IconButton, Badge, Tag, Card, Icon, Input, Select, Checkbox, Radio, Switch, Tabs, Dialog, Toast, Tooltip } = window.OrbitDesignSystem_da09b0;
+function AdminLogin({ onDone }) {
+  const t = useT(); const [mode, setMode] = React.useState('setup'); const [step, setStep] = React.useState(0);
+  const [emp, setEmp] = React.useState('EMP-001'); const [gmail, setGmail] = React.useState('m.osman.orbit@gmail.com'); const [code, setCode] = React.useState(''); const [sent, setSent] = React.useState(false);
+  const [p1, setP1] = React.useState(''); const [p2, setP2] = React.useState(''); const [err, setErr] = React.useState('');
+  const steps = ['Verify', 'Gmail', 'Password'];
+  const next = () => { setErr(''); if (step === 0) { if (!/^EMP-\d{3}$/i.test(emp.trim())) return setErr(t('Employee ID format: EMP-000')); setStep(1); } else if (step === 1) { if (!sent) { setSent(true); return; } if (code.length < 6) return setErr(t('Enter the 6-digit code sent to your Gmail')); setStep(2); } else { if (p1.length < 8) return setErr(t('Password must be at least 8 characters')); if (p1 !== p2) return setErr(t('Passwords do not match')); onDone(); } };
+  return <div style={{ minHeight: '100vh', display: 'flex', background: 'var(--surface-page)' }}>
+    <div style={{ flex: 1, background: 'var(--navy-700)', color: '#fff', padding: 56, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+      <img src="../../assets/orbit-logo-reversed.png" style={{ height: 60, alignSelf: 'flex-start' }} />
+      <div><Overline color="var(--orange-400)">Orbit Cargo ERP</Overline><div style={{ fontFamily: 'var(--font-display)', fontVariationSettings: "'wdth' 118", fontWeight: 850, fontSize: 52, lineHeight: 1.02, textTransform: 'uppercase', marginTop: 14 }}>{t('Admin Panel')}</div><div style={{ color: 'var(--navy-300)', fontSize: 16, marginTop: 12, maxWidth: 420 }}>{t('Manage customers, shipments, finance and documents for every business year.')}</div></div>
+      <div style={{ fontSize: 12, color: 'var(--navy-300)' }}>© 2026 Orbit Cargo & Logistics</div></div>
+    <div style={{ width: 520, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: 48, position: 'relative' }}>
+      <div style={{ position: 'absolute', top: 24, right: 24, display: 'flex', gap: 10, alignItems: 'center' }}><a href="../customer-app/index.html" style={{ fontSize: 13, fontWeight: 600 }}>{t('Customer App')}</a><LangToggle /></div>
+      <div style={{ font: '700 28px/1.2 var(--font-display)', color: 'var(--text-strong)' }}>{t('Admin Login')}</div>
+      <div style={{ fontSize: 14, color: 'var(--text-muted)', margin: '6px 0 22px' }}>{t(mode === 'setup' ? 'First time? Verify your account and create a password.' : 'Sign in with your Employee ID and password.')}</div>
+      <Seg full options={[['setup', 'Create Password'], ['signin', 'Sign in']]} value={mode} onChange={m => { setMode(m); setErr(''); }} />
+      <div style={{ height: 22 }} />
+      {mode === 'setup' ? <>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 24 }}>{steps.map((s, i) => <React.Fragment key={s}><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ width: 28, height: 28, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', font: '700 12px var(--font-body)', background: i < step ? 'var(--navy-700)' : i === step ? 'var(--orange-500)' : '#fff', color: i <= step ? '#fff' : 'var(--text-muted)', border: i > step ? '1.5px solid var(--border-strong)' : 0 }}>{i < step ? <Icon name="check" size={14} /> : i + 1}</span><span style={{ font: (i === step ? '700' : '500') + ' 13px var(--font-body)', color: i <= step ? 'var(--text-strong)' : 'var(--text-muted)' }}>{t(s)}</span></div>{i < 2 && <span style={{ flex: 1, height: 2, margin: '0 10px', background: i < step ? 'var(--navy-700)' : 'var(--gray-200)' }} />}</React.Fragment>)}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {step === 0 && <Input size="l" label={t('Employee ID')} value={emp} onChange={e => setEmp(e.target.value)} leadingIcon={<Icon name="id-card" size={16} />} inputStyle={{ fontFamily: 'var(--font-mono)' }} hint={t('Provided by your administrator')} />}
+          {step === 1 && <><Input size="l" label={t('Gmail')} value={gmail} onChange={e => setGmail(e.target.value)} leadingIcon={<Icon name="mail" size={16} />} />
+            {sent && <Input size="l" label={t('Gmail Verification')} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" inputStyle={{ fontFamily: 'var(--font-mono)', letterSpacing: '.3em' }} hint={t('Code sent to') + ' ' + gmail} />}</>}
+          {step === 2 && <><Input size="l" type="password" label={t('Create Password')} value={p1} onChange={e => setP1(e.target.value)} leadingIcon={<Icon name="lock" size={16} />} hint={t('At least 8 characters')} /><Input size="l" type="password" label={t('Confirm Password')} value={p2} onChange={e => setP2(e.target.value)} leadingIcon={<Icon name="lock-keyhole" size={16} />} /></>}
+          {err && <div style={{ fontSize: 13, color: 'var(--status-danger)' }}>{err}</div>}
+          <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>{step > 0 && <Button size="l" variant="outline" onClick={() => { setStep(step - 1); setErr(''); }}>{t('Back')}</Button>}<Button size="l" style={{ flex: 1 }} onClick={next} trailingIcon={step < 2 ? <Icon name="arrow-right" size={16} /> : null}>{t(step === 2 ? 'Create Password' : step === 1 && sent ? 'Verify' : step === 1 ? 'Send code' : 'Continue')}</Button></div></div></> :
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}><Input size="l" label={t('Employee ID')} defaultValue="EMP-001" leadingIcon={<Icon name="id-card" size={16} />} inputStyle={{ fontFamily: 'var(--font-mono)' }} /><Input size="l" label={t('Gmail')} defaultValue="m.osman.orbit@gmail.com" leadingIcon={<Icon name="mail" size={16} />} /><Input size="l" type="password" label={t('Gmail Password')} defaultValue="orbit2026" leadingIcon={<Icon name="lock" size={16} />} /><Button size="l" fullWidth onClick={onDone}>{t('Continue')}</Button></div>}
+    </div></div>;
+}
+window.AdminLogin = AdminLogin;

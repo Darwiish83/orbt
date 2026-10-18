@@ -1,0 +1,47 @@
+/*
+ * OrbitCargo global stylesheet.
+ * Token variable files are imported first (exact DS values, the source of truth),
+ * then Tailwind layers. Element base styles (from the DS base.css) are folded into
+ * @layer base so they sit above Tailwind preflight. Font-family variables are
+ * rebound to the next/font faces (ADR: remove the CDN font dependency) while
+ * keeping 'Archivo' / 'JetBrains Mono' as fallbacks so the appearance is unchanged.
+ */
+@import "../ui/tokens/colors.css";
+@import "../ui/tokens/typography.css";
+@import "../ui/tokens/spacing.css";
+@import "../ui/tokens/effects.css";
+
+/* Rebind the three font-family tokens to the next/font faces. Unlayered and
+   placed after the imports so it overrides the literal values in typography.css. */
+:root {
+  --font-display: var(--font-archivo), system-ui, sans-serif;
+  --font-body: var(--font-archivo), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    margin: 0;
+  }
+  body {
+    font-family: var(--font-body);
+    font-size: var(--text-body);
+    line-height: var(--leading-normal);
+    color: var(--text-body);
+    background: var(--surface-page);
+    -webkit-font-smoothing: antialiased;
+  }
+  a {
+    color: var(--text-link);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  a:hover {
+    color: var(--orange-600);
+  }
+}

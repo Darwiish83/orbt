@@ -1,0 +1,21 @@
+const SUPPORT = { phones: [['252614145971', '+252 614145971'], ['252614111539', '+252 614111539']], email: 'support@orbitcargo.so' };
+function waLink(text, n) { return 'https://wa.me/' + (n || SUPPORT.phones[0][0]) + '?text=' + encodeURIComponent(text); }
+function SupportScreen({ nav }) {
+  const t = useT(); const me = ME;
+  const base = t('Hello Orbit Cargo, my reference is {r}.').replace('{r}', me.ref);
+  const topics = [['package-search', 'Where is my cargo?'], ['receipt-text', 'Question about my invoice'], ['banknote', 'I made a payment'], ['file-text', 'I need my documents'], ['message-circle-question', 'Other question']];
+  const btn = (bg, fg, bd) => ({ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, height: 52, borderRadius: 12, border: bd || 0, background: bg, color: fg, font: '700 15px var(--font-body)', textDecoration: 'none', cursor: 'pointer' });
+  const hours = [['Saturday – Thursday', '8:00 – 18:00'], ['Friday', 'Closed']];
+  return <Scroll>
+    <div style={{ background: 'var(--navy-700)', color: '#fff', borderRadius: 'var(--radius-l)', padding: 16, display: 'flex', gap: 12, alignItems: 'center' }}><span style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(255,255,255,.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Icon name="headset" size={22} /></span><div><div style={{ font: '700 17px var(--font-display)' }}>{t('How can we help?')}</div><div style={{ fontSize: 12, opacity: .8, marginTop: 2 }}>{t('Our team replies on WhatsApp during working hours.')}</div></div></div>
+    {SUPPORT.phones.map(([n, lbl]) => <Card key={n} padding={12}><div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}><div style={{ display: 'flex', alignItems: 'center', gap: 8, font: '700 15px var(--font-body)', color: 'var(--text-strong)' }}><Icon name="phone" size={16} color="var(--navy-700)" />{lbl}</div><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}><a href={waLink(base, n)} target="_blank" rel="noopener" style={{ ...btn('#075E54', '#fff'), height: 44, fontSize: 14 }}><Icon name="message-circle" size={18} />WhatsApp</a><a href={'tel:+' + n} style={{ ...btn('#fff', 'var(--navy-700)', '1.5px solid var(--navy-700)'), height: 44, fontSize: 14 }}><Icon name="phone" size={16} />{t('Call')}</a></div></div></Card>)}
+    <SectionTitle>Quick questions</SectionTitle>
+    <Card padding={0}>{topics.map(([ic, l], i) => <a key={l} href={waLink(base + ' ' + t(l))} target="_blank" rel="noopener" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 14px', borderTop: i ? '1px solid var(--border-default)' : 0, textDecoration: 'none', color: 'var(--text-strong)' }}><Icon name={ic} size={18} color="var(--navy-700)" /><span style={{ flex: 1, font: '500 14px var(--font-body)' }}>{t(l)}</span><Icon name="chevron-right" size={16} color="var(--text-muted)" /></a>)}</Card>
+    <SectionTitle>Working hours</SectionTitle>
+    <Card padding={14}>{hours.map(([d, h]) => <div key={d} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 13 }}><span style={{ color: 'var(--text-muted)' }}>{t(d)}</span><b style={{ color: h === 'Closed' ? 'var(--red-600)' : 'var(--text-strong)' }}>{t(h)}</b></div>)}</Card>
+    <SectionTitle>Office</SectionTitle>
+    <Card padding={14}><div style={{ display: 'flex', gap: 12 }}><Icon name="map-pin" size={18} color="var(--orange-600)" /><div style={{ fontSize: 13, lineHeight: 1.55, color: 'var(--text-body)' }}><b style={{ color: 'var(--text-strong)' }}>Orbit Cargo & Logistics</b><br />Jedmarexan, Howlwadag District<br />Mogadishu, Somalia<br />{SUPPORT.phones.map(p => p[1]).join(' · ')}<br />{SUPPORT.email}</div></div></Card>
+  </Scroll>;
+}
+function AskShipmentBtn({ s }) { const t = useT(); return <a href={waLink(t('Hello Orbit Cargo, my reference is {r}.').replace('{r}', ME.ref) + ' ' + t('Question about shipment {c}.').replace('{c}', scode(s.code)))} target="_blank" rel="noopener" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, height: 46, borderRadius: 12, background: '#075E54', color: '#fff', font: '700 14px var(--font-body)', textDecoration: 'none' }}><Icon name="message-circle" size={18} />{t('Ask about this shipment')}</a>; }
+Object.assign(window, { SupportScreen, AskShipmentBtn });

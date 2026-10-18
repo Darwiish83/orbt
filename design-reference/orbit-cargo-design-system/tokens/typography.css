@@ -1,0 +1,10 @@
+:root{
+--font-display:'Archivo',system-ui,sans-serif;--font-body:'Archivo',system-ui,sans-serif;--font-mono:'JetBrains Mono',ui-monospace,monospace;
+--wdth-display:118; /* @kind other */
+--wdth-body:100; /* @kind other */
+
+--weight-regular:400;--weight-medium:500;--weight-semibold:600;--weight-bold:700;--weight-black:850;
+--text-display-xl:64px;--text-display-l:48px;--text-display-m:36px;--text-h1:30px;--text-h2:24px;--text-h3:19px;--text-body-l:17px;--text-body:15px;--text-body-s:13px;--text-caption:12px;--text-overline:11px;
+--leading-tight:1.05;--leading-snug:1.25;--leading-normal:1.5;
+--tracking-display:-0.01em;--tracking-overline:0.14em;
+}

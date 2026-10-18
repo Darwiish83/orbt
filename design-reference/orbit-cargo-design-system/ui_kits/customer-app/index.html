@@ -1,0 +1,33 @@
+<!-- @dsCard group="Customer App" viewport="1200x980" name="Customer app — iPhone, Samsung, Desktop" subtitle="Login, Home, Shipments, Finance, Invoice, Notifications, Records, Profile · EN/SO" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Orbit — Customer App</title><link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script><script src="../shared/image-slot.js"></script><script src="../shared/data.js"></script><script src="../shared/bank-logos.js"></script><script src="../shared/bus.js"></script><script src="../shared/so.js"></script><script src="../shared/ar.js"></script>
+<script type="text/babel" src="../shared/i18n.jsx"></script><script type="text/babel" src="../shared/kit.jsx"></script><script type="text/babel" src="../shared/receipt.jsx"></script>
+<script type="text/babel" src="Phone.jsx"></script><script type="text/babel" src="Login.jsx"></script><script type="text/babel" src="Home.jsx"></script><script type="text/babel" src="Shipments.jsx"></script><script type="text/babel" src="Finance.jsx"></script><script type="text/babel" src="InvoiceDetail.jsx"></script><script type="text/babel" src="Notifications.jsx"></script><script type="text/babel" src="Support.jsx"></script><script type="text/babel" src="Records.jsx"></script><script type="text/babel" src="Profile.jsx"></script><script type="text/babel" src="App.jsx"></script>
+<style>body{background:var(--gray-200);margin:0}</style></head><body><div id="root"></div>
+<script type="text/babel">
+function Label({ icon, children }) { return <div style={{ display: 'flex', alignItems: 'center', gap: 8, font: '700 13px var(--font-body)', letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--navy-700)' }}><Icon name={icon} size={16} />{children}</div>; }
+var { Icon } = window.OrbitDesignSystem_da09b0;
+function Fit({ w, h, children }) {
+  const ref = React.useRef(); const [k, setK] = React.useState(1);
+  React.useEffect(() => { const f = () => { const el = ref.current; if (!el) return; setK(Math.min(1, el.clientWidth / w, (window.innerHeight - 150) / h)); }; f(); window.addEventListener('resize', f); return () => window.removeEventListener('resize', f); }, [w, h]);
+  return <div ref={ref} style={{ width: '100%', display: 'flex', justifyContent: 'center' }}><div style={{ width: w * k, height: h * k }}><div style={{ width: w, height: h, transform: 'scale(' + k + ')', transformOrigin: '0 0', display: 'flex', gap: 48, justifyContent: 'center' }}>{children}</div></div></div>;
+}
+function Stage() {
+  const t = useT(); const [dev, setDev] = React.useState(localStorage.getItem('orbit-dev') || 'iphone');
+  const pick = d => { setDev(d); localStorage.setItem('orbit-dev', d); };
+  const opts = [['iphone', 'iPhone', 'smartphone'], ['samsung', 'Samsung', 'smartphone'], ['desktop', 'Computer', 'monitor'], ['all', 'All', 'layout-grid']];
+  const size = { iphone: [390, 844], samsung: [384, 832], desktop: [1180, 760], all: [390 + 384 + 1180 + 96, 844] }[dev];
+  return <div style={{ padding: '16px 20px 32px', display: 'flex', flexDirection: 'column', gap: 18, alignItems: 'center' }}>
+    <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}><img src="../../assets/orbit-logo.png" style={{ height: 36 }} /><div style={{ flex: 1 }} /><a href="../admin/index.html" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 36, padding: '0 14px', borderRadius: 'var(--radius-s)', background: 'var(--navy-700)', color: '#fff', font: '700 13px var(--font-body)', textDecoration: 'none' }}><Icon name="layout-dashboard" size={15} />{t('Admin Panel')}</a><LangToggle /></div>
+    <Seg options={opts} value={dev} onChange={pick} />
+    <Fit w={size[0]} h={size[1]}>
+      {(dev === 'iphone' || dev === 'all') && <MobileCustomerApp device="iphone" />}
+      {(dev === 'samsung' || dev === 'all') && <MobileCustomerApp device="samsung" start={{ authed: true, tab: 'home', stack: [] }} />}
+      {(dev === 'desktop' || dev === 'all') && <DesktopCustomerApp start={{ authed: true, tab: 'home', stack: [] }} />}
+    </Fit></div>;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<LangProvider><Stage /></LangProvider>);
+</script></body></html>
