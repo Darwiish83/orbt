@@ -83,7 +83,7 @@ DS relies on external CDNs (React/Babel UMD, `jsdelivr` Lucide, `flagcdn`, `pexe
 
 - Payments: **no real provider integrated** — must not claim real payment processing until one is integrated & verified.
 - Customs/tax/FX rules intentionally **not invented** — configurable + documented; business-owner sign-off needed.
-- MFA availability depends on the chosen Auth.js configuration — if unavailable, document the gap and a secure rollout plan.
+- **MFA: deferred (ADR-006).** The Phase 3 Auth.js Credentials config does not yet include TOTP. `mfaEnabled` exists as a schema hook. Rollout plan: add TOTP enrollment (authenticator app) for privileged roles, store the secret encrypted, require a second factor at login for staff with elevated permissions, and provide recovery codes — scheduled for a later phase before production launch.
 - Malware scanning for uploads, backup/restore, retention/deletion policies — to be defined (Phase 6/9).
 
 **Nothing here is implemented in Phase 0.** Controls are verified in later phases with the tests in TEST_STRATEGY; production readiness is not claimed while any critical security test fails.

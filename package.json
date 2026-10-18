@@ -25,9 +25,11 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.2.2",
     "@prisma/client": "^6.19.3",
     "lucide-react": "^0.468.0",
     "next": "^15.1.6",
+    "next-auth": "^5.0.0-beta.32",
     "prisma": "^6.19.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

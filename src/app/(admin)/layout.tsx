@@ -1,9 +1,20 @@
+import { redirect } from "next/navigation";
 import { AdminShell } from "@/components/admin/AdminShell";
+import { getSessionUser } from "@/modules/authz/session";
+import { logout } from "@/app/login/actions";
 
 /**
- * Admin route group layout. In Phase 3 this gains server-side authentication +
- * authorization (deny-by-default); for now it provides the shell chrome only.
+ * Admin route group layout. Server-side auth gate (defense in depth alongside
+ * the edge middleware): unauthenticated users are redirected to /login.
+ * Fine-grained per-page permission gating is layered on in later phases.
  */
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  return <AdminShell>{children}</AdminShell>;
+export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+
+  return (
+    <AdminShell userEmail={user.email} onLogout={logout}>
+      {children}
+    </AdminShell>
+  );
 }

@@ -7,6 +7,7 @@ import { defineConfig, devices } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./tests/e2e",
+  globalSetup: "./tests/e2e/global-setup.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
@@ -22,10 +23,12 @@ export default defineConfig({
     },
   ],
   webServer: {
-    // Dedicated port so E2E never binds to an unrelated dev server on :3000.
-    command: "npm run dev -- -p 3100",
+    // Run against a production build on a dedicated port: deterministic and
+    // free of the dev server's on-demand route compilation (which made auth
+    // redirects flaky). Never binds to the unrelated dev server on :3000.
+    command: "npm run build && npm run start -- -p 3100",
     url: "http://localhost:3100",
     reuseExistingServer: false,
-    timeout: 120_000,
+    timeout: 240_000,
   },
 });

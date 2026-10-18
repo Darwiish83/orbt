@@ -14,7 +14,15 @@ import { ADMIN_NAV } from "./adminNav";
  * Presentational in Phase 1 (no auth/role gating yet). The active item shows
  * the orange inset bar; mobile collapses the sidebar behind a menu button.
  */
-export function AdminShell({ children }: { children: React.ReactNode }) {
+export function AdminShell({
+  children,
+  userEmail,
+  onLogout,
+}: {
+  children: React.ReactNode;
+  userEmail?: string;
+  onLogout?: () => void | Promise<void>;
+}) {
   const t = useT();
   const pathname = usePathname();
   const [navOpen, setNavOpen] = useState(false);
@@ -86,6 +94,50 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             </Link>
           );
         })}
+
+        {/* Account footer */}
+        <div style={{ marginTop: "auto", paddingTop: 12 }}>
+          {userEmail && (
+            <div
+              style={{
+                font: "500 12px var(--font-mono)",
+                color: "var(--navy-300)",
+                padding: "0 12px 8px",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+              title={userEmail}
+            >
+              {userEmail}
+            </div>
+          )}
+          {onLogout && (
+            <form action={onLogout}>
+              <button
+                type="submit"
+                data-testid="logout-button"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  width: "100%",
+                  height: 40,
+                  padding: "0 12px",
+                  border: "1px solid rgba(255,255,255,.18)",
+                  borderRadius: "var(--radius-s)",
+                  background: "transparent",
+                  color: "#fff",
+                  font: "600 14px var(--font-body)",
+                  cursor: "pointer",
+                }}
+              >
+                <Icon name="LogOut" size={18} color="var(--orange-400)" />
+                {t("Logout")}
+              </button>
+            </form>
+          )}
+        </div>
       </aside>
 
       {/* Main column */}

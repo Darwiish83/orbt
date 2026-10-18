@@ -144,9 +144,13 @@ enum NotificationStatus {
 model User {
   id           String     @id @default(cuid())
   email        String     @unique
-  passwordHash String? // set during Phase 3 (auth)
+  passwordHash String? // Argon2id; set on account setup
   status       UserStatus @default(INVITED)
   mfaEnabled   Boolean    @default(false)
+  // Bumped to invalidate all existing JWT sessions (password reset / forced
+  // logout). The authorization layer compares this on every protected access.
+  sessionEpoch Int        @default(0)
+  lockedUntil  DateTime?
 
   // A user is EITHER staff (employee) OR a customer contact — enforced by a
   // CHECK constraint in the migration (not both set).
@@ -155,13 +159,41 @@ model User {
   customerId String?   @unique
   customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
-  roles       UserRole[]
-  auditEvents AuditEvent[] @relation("AuditActor")
+  roles        UserRole[]
+  auditEvents  AuditEvent[]         @relation("AuditActor")
+  resetTokens  PasswordResetToken[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([status])
+}
+
+// Password reset token. Only the HASH of the token is stored; the raw token is
+// emailed once. Single-use (usedAt) and expiring (expiresAt).
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// Durable record of authentication attempts for rate limiting / lockout.
+model LoginAttempt {
+  id         String   @id @default(cuid())
+  identifier String // email or reset identifier (lowercased)
+  ip         String?
+  kind       String // "login" | "reset"
+  success    Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([identifier, kind, createdAt])
+  @@index([ip, kind, createdAt])
 }
 
 model Role {

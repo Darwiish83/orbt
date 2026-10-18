@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 /** Minimal .env.test loader (no dotenv dependency). */
@@ -22,6 +23,9 @@ function loadEnv(path: string): Record<string, string> {
 }
 
 export default defineConfig({
+  resolve: {
+    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+  },
   test: {
     environment: "node",
     include: ["tests/integration/**/*.test.ts"],

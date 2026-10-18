@@ -20,9 +20,9 @@ Execution rule for every phase after approval: (1) inspect current state & prior
 **Scope:** Prisma schema for confirmed entities (DATA_MODEL_PLAN); initial versioned migrations; constraints (FK/unique/check), indexes, deletion policies; decimal money/weight columns; test DB provisioning; **no production seed**.
 **Acceptance:** ✅ migration applies cleanly to fresh dev + test DBs · ✅ 9 integration tests (constraints/integrity/decimal) pass · ✅ `migrate status` no drift · ✅ reference-data seed only · ✅ typecheck/lint/unit regression clean.
 
-## Phase 3 — Auth, sessions, roles, permissions
-**Scope:** Auth.js (credentials + server sessions); Argon2id hashing; password reset (hashed, expiring, single-use tokens); rate limiting on login/reset; session rotation/invalidation; role/permission model + **server authorization guards** (deny-by-default, object-level); MFA for privileged accounts (or documented gap + plan); replace all DS fake-auth.
-**Acceptance:** full **negative-authorization** suite passes (unauthorized, cross-customer, unauthorized-finance, escalation, self-grant); session/reset tests pass; no client-trusted authz.
+## Phase 3 — Auth, sessions, roles, permissions ✅ (complete 2026-10-18 — see progress/PHASE_3_REPORT.md)
+**Scope:** Auth.js (credentials + JWT with sessionEpoch re-check, ADR-005); Argon2id hashing; password reset (hashed, expiring, single-use); DB-backed rate limiting; **server authorization guards** (deny-by-default, object-level); MFA documented gap + plan (ADR-006); replaced all DS fake-auth.
+**Acceptance:** ✅ negative-authorization suite passes (unauthorized, cross-customer IDOR, unauthorized-finance, escalation, self-grant) · ✅ session-invalidation + reset single-use/expiry + rate-limit tests pass · ✅ 26 integration + 4 E2E pass · ✅ typecheck/lint/build clean · no client-trusted authz.
 
 ## Phase 4 — Customers, shipments, tracking, operations
 **Scope:** customer CRUD (scoped); shipment model with **mode-specific detail** (air/sea/road); **documented shipment state machine** + server-validated transitions + append-only events; secure unique tracking-number generation; public tracking exposing approved subset only; operations/tasks; **server-side pagination/filtering**; country/year scoping.

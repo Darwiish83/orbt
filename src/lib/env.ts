@@ -12,6 +12,8 @@ const serverSchema = z.object({
   DATABASE_URL: z.string().url().refine((u) => u.startsWith("postgres"), {
     message: "DATABASE_URL must be a PostgreSQL connection string",
   }),
+  // Auth.js signing secret. Required outside of tests.
+  AUTH_SECRET: z.string().min(16).optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverSchema>;
