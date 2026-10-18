@@ -92,6 +92,9 @@ export default function LoginPage() {
           <Button type="submit" size="l" fullWidth disabled={pending}>
             {pending ? "Signing in…" : "Sign in"}
           </Button>
+          <a href="/forgot-password" style={{ fontSize: 13, color: "var(--navy-700)", textAlign: "center" }}>
+            Forgot your password?
+          </a>
         </form>
       </div>
     </div>

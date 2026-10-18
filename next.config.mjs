@@ -8,6 +8,13 @@ const nextConfig = {
   productionBrowserSourceMaps: false,
   // Minimal, self-contained production server for containerized deploys.
   output: "standalone",
+  experimental: {
+    // Allow Server Actions when the app is reached via a Cloudflare quick
+    // tunnel (dev sharing) in addition to the local origin.
+    serverActions: {
+      allowedOrigins: ["localhost:3100", "*.trycloudflare.com"],
+    },
+  },
 };
 
 export default nextConfig;
