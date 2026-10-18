@@ -66,6 +66,15 @@ export default function LoginPage() {
             required
             leadingIcon={<Icon name="Lock" size={16} />}
           />
+          <Input
+            name="code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            label="Authenticator code"
+            hint="Only if two-factor is enabled on your account"
+            leadingIcon={<Icon name="ShieldCheck" size={16} />}
+            inputStyle={{ fontFamily: "var(--font-mono)", letterSpacing: "0.2em" }}
+          />
           {state.error && (
             <div
               role="alert"

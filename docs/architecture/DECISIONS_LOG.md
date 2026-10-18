@@ -21,7 +21,9 @@ Authoritative record of resolved decisions. Supersedes the "open decision" notes
 
 | ADR-011 | 2026-10-18 | **Transfer send/receive workflow** | **A `Transfer` entity with PENDING→SENT→RECEIVED states.** Capability = `transfer:write` permission + the acting employee's `transferRole` (SEND creates/sends, RECEIVE receives); super admins bypass. Country scope enforced from the user's role scopes (from-country to send, to-country to receive). | Implements the deferred inter-country transfer flow faithfully to the design system's send/receive agent model, reusing the existing permission + scope machinery. |
 
+| ADR-012 | 2026-10-18 | **MFA implemented** (supersedes ADR-006 deferral) | **TOTP (otplib) for privileged accounts** (super admin / *_admin), seed encrypted at rest (AES-256-GCM, key derived from AUTH_SECRET), single-use hashed recovery codes. Second factor required at login when enabled; privileged users are forced to enroll before admin access. | Closes the ADR-006 gap. Verified end-to-end: integration tests for enroll/verify/recovery + an E2E that signs in with a live TOTP code. |
+
 ## Still open (to resolve by the phase noted)
 - **Specific charge-component model** — if Orbit confirms the DS `quality/brandPcs/brandRate/fatura/delivery/discount` fields as first-class, add them to `ChargeLineItem` (additive to ADR-009). *(owner confirmation)*
 - **Customs / tax / FX rules** — intentionally not invented; charge categories are configurable, rates/policies to be provided by the business owner. *(owner input)*
-- **MFA (TOTP)** — deferred with rollout plan (ADR-006); implement before production launch. *(later phase)*
+- ~~MFA (TOTP)~~ — **done (ADR-012):** implemented for privileged accounts with recovery codes.

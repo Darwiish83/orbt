@@ -8,9 +8,10 @@ export type LoginState = { error: string | null };
 export async function login(_prev: LoginState, formData: FormData): Promise<LoginState> {
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
+  const code = String(formData.get("code") ?? "");
 
   try {
-    await signIn("credentials", { email, password, redirectTo: "/dashboard" });
+    await signIn("credentials", { email, password, code, redirectTo: "/dashboard" });
   } catch (error) {
     // signIn throws a NEXT_REDIRECT on success — that must propagate.
     if (error instanceof AuthError) {

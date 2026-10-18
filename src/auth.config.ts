@@ -20,6 +20,7 @@ const PROTECTED_PREFIXES = [
   "/notifications",
   "/settings",
   "/account",
+  "/mfa",
 ];
 
 export const authConfig = {

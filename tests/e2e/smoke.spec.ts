@@ -1,5 +1,12 @@
+import { authenticator } from "otplib";
 import { expect, test } from "@playwright/test";
-import { E2E_CUSTOMER_EMAIL, E2E_CUSTOMER_PASSWORD, E2E_EMAIL, E2E_PASSWORD } from "./constants";
+import {
+  E2E_CUSTOMER_EMAIL,
+  E2E_CUSTOMER_PASSWORD,
+  E2E_EMAIL,
+  E2E_MFA_SECRET,
+  E2E_PASSWORD,
+} from "./constants";
 
 test("landing page shows the brand hero", async ({ page }) => {
   await page.goto("/");
@@ -50,6 +57,7 @@ test.describe("authenticated session", () => {
     await page.goto("/login");
     await page.getByLabel("Email").fill(E2E_EMAIL);
     await page.getByLabel("Password").fill(E2E_PASSWORD);
+    await page.getByLabel("Authenticator code").fill(authenticator.generate(E2E_MFA_SECRET));
     await page.getByRole("button", { name: /sign in/i }).click();
 
     // Generous timeout: a dev server compiles /dashboard on first hit.
@@ -73,6 +81,7 @@ test.describe("authenticated session", () => {
     await page.goto("/login");
     await page.getByLabel("Email").fill(E2E_EMAIL);
     await page.getByLabel("Password").fill(E2E_PASSWORD);
+    await page.getByLabel("Authenticator code").fill(authenticator.generate(E2E_MFA_SECRET));
     await page.getByRole("button", { name: /sign in/i }).click();
     await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
 

@@ -147,6 +147,7 @@ model User {
   passwordHash String? // Argon2id; set on account setup
   status       UserStatus @default(INVITED)
   mfaEnabled   Boolean    @default(false)
+  mfaSecret    String? // TOTP secret, AES-256-GCM encrypted at rest
   // Bumped to invalidate all existing JWT sessions (password reset / forced
   // logout). The authorization layer compares this on every protected access.
   sessionEpoch Int        @default(0)
@@ -159,14 +160,27 @@ model User {
   customerId String?   @unique
   customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
-  roles        UserRole[]
-  auditEvents  AuditEvent[]         @relation("AuditActor")
-  resetTokens  PasswordResetToken[]
+  roles         UserRole[]
+  auditEvents   AuditEvent[]         @relation("AuditActor")
+  resetTokens   PasswordResetToken[]
+  recoveryCodes MfaRecoveryCode[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([status])
+}
+
+// Single-use MFA recovery codes. Only the hash is stored.
+model MfaRecoveryCode {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String    @unique
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }
 
 // Password reset token. Only the HASH of the token is stored; the raw token is

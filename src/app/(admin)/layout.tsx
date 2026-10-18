@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { getSessionUser } from "@/modules/authz/session";
+import { isPrivileged } from "@/modules/auth/mfa";
 import { logout } from "@/app/login/actions";
 
 /**
@@ -12,6 +13,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const user = await getSessionUser();
   if (!user) redirect("/login");
   if (user.customerId) redirect("/account"); // customers use the portal, not admin
+  // Privileged accounts must enroll in MFA before accessing the admin area.
+  if (isPrivileged(user.roleKeys, user.isSuperAdmin) && !user.mfaEnabled) redirect("/mfa/setup");
 
   return (
     <AdminShell userEmail={user.email} onLogout={logout}>

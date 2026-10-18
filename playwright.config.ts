@@ -8,7 +8,12 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./tests/e2e",
   globalSetup: "./tests/e2e/global-setup.ts",
-  fullyParallel: true,
+  fullyParallel: false,
+  // Serial run against the dev server for stability (avoids first-compile
+  // contention). The dev server also runs in development mode, which is correct
+  // for HTTP localhost: production uses HTTPS + Secure cookies (verified by the
+  // header checks), which a browser would not send over plain HTTP.
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? "github" : "list",
@@ -23,12 +28,11 @@ export default defineConfig({
     },
   ],
   webServer: {
-    // Run against a production build on a dedicated port: deterministic and
-    // free of the dev server's on-demand route compilation (which made auth
-    // redirects flaky). Never binds to the unrelated dev server on :3000.
-    command: "npm run build && npm run start -- -p 3100",
+    // Dev server on a dedicated port (development mode → HTTP-friendly cookies,
+    // no production boot-validation). Serial workers keep first-compile stable.
+    command: "npm run dev -- -p 3100",
     url: "http://localhost:3100",
     reuseExistingServer: false,
-    timeout: 240_000,
+    timeout: 180_000,
   },
 });

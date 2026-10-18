@@ -19,6 +19,7 @@ const PROTECTED_PREFIXES = [
   "/notifications",
   "/settings",
   "/account",
+  "/mfa",
 ];
 
 function buildCsp(nonce: string, isDev: boolean): string {
