@@ -1,10 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // Phase 1: no remote images wired yet. Remote image patterns + CSP are configured in Phase 8.
-  experimental: {
-    // typedRoutes can be enabled once routes stabilize.
-  },
+  // Hardening (Phase 8): don't advertise the framework, don't ship browser
+  // source maps to production (avoids leaking source), CSP + security headers
+  // are set per-request in middleware.ts (nonce-based).
+  poweredByHeader: false,
+  productionBrowserSourceMaps: false,
 };
 
 export default nextConfig;

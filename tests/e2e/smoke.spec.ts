@@ -13,6 +13,25 @@ test("unauthenticated access to the admin area redirects to login", async ({ pag
   await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
 });
 
+test("responses carry CSP and security headers", async ({ page }) => {
+  const res = await page.goto("/login");
+  const headers = res!.headers();
+  expect(headers["content-security-policy"]).toContain("default-src 'self'");
+  expect(headers["content-security-policy"]).toContain("frame-ancestors 'none'");
+  expect(headers["content-security-policy"]).toContain("object-src 'none'");
+  expect(headers["x-frame-options"]).toBe("DENY");
+  expect(headers["x-content-type-options"]).toBe("nosniff");
+  expect(headers["referrer-policy"]).toBeTruthy();
+  expect(headers["permissions-policy"]).toBeTruthy();
+  expect(headers["x-powered-by"]).toBeUndefined();
+});
+
+test("health endpoint reports ok", async ({ request }) => {
+  const res = await request.get("/api/health");
+  expect(res.status()).toBe(200);
+  expect((await res.json()).status).toBe("ok");
+});
+
 test("public tracking shows a not-found message for an unknown number", async ({ page }) => {
   await page.goto("/track?n=ORB-2026-ZZZZZZ");
   await expect(page.getByRole("status")).toContainText(/no shipment found/i);

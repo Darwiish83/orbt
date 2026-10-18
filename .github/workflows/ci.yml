@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: orbit_app
+          POSTGRES_PASSWORD: orbit_ci_pw
+          POSTGRES_DB: orbitcargo_test
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U orbit_app -d orbitcargo_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://orbit_app:orbit_ci_pw@localhost:5433/orbitcargo_test?schema=public
+      AUTH_SECRET: ci-only-secret-value-change-me-32chars
+      DOCUMENTS_DIR: storage/ci-documents
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - name: Apply migrations (test DB)
+        run: npx prisma migrate deploy
+      - name: Integration tests
+        run: |
+          printf 'DATABASE_URL="%s"\n' "$DATABASE_URL" > .env.test
+          npm run test:integration
+      - run: npm run build
+      - name: Dependency audit (high severity)
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: orbit_app
+          POSTGRES_PASSWORD: orbit_ci_pw
+          POSTGRES_DB: orbitcargo
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U orbit_app -d orbitcargo"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://orbit_app:orbit_ci_pw@localhost:5433/orbitcargo?schema=public
+      AUTH_SECRET: ci-only-secret-value-change-me-32chars
+      DOCUMENTS_DIR: storage/ci-documents
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: |
+          printf 'DATABASE_URL="%s"\n' "$DATABASE_URL" > .env
+          printf 'AUTH_SECRET="%s"\n' "$AUTH_SECRET" >> .env
+          printf 'DOCUMENTS_DIR="%s"\n' "$DOCUMENTS_DIR" >> .env
+      - run: npx prisma migrate deploy
+      - run: npx prisma db seed
+      - run: npx playwright install --with-deps chromium
+      # Smoke suite only; visual-regression baselines are platform-specific and
+      # are run locally (see tests/e2e/visual.spec.ts).
+      - run: npm run test:e2e -- smoke.spec.ts

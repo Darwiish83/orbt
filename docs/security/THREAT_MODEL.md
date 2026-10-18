@@ -67,13 +67,13 @@ The DS SPA demonstrates the **exact anti-patterns** to eliminate:
 - [ ] Parameterized queries via Prisma (no raw string SQL with user input).
 - [ ] XSS prevention; **no `dangerouslySetInnerHTML` with untrusted content**; safe output encoding.
 - [ ] CSRF protection appropriate to Server Actions / route handlers.
-- [ ] Secure HTTP headers + tested **Content Security Policy** (accounts for fonts/icons/images/remote patterns).
+- [x] Secure HTTP headers + tested **Content Security Policy** — **implemented (Phase 8):** nonce-based `script-src` + `strict-dynamic`, `frame-ancestors 'none'`, `object-src 'none'`, HSTS/XFO/nosniff/Referrer-Policy/Permissions-Policy; verified in E2E not to break hydration. (`style-src 'unsafe-inline'` retained for the inline-style DS — documented residual.)
 - [ ] Env-var & secret management; least-privilege DB creds.
 - [ ] Safe error handling (no stack traces/sensitive data to client).
 - [ ] Audit logging for security-sensitive operations.
-- [ ] Dependency vulnerability checks in CI; committed lockfile.
+- [x] Dependency vulnerability checks in CI (`npm audit`) + committed lockfile — **CI added (Phase 8).**
 - [x] Secure file upload/download — **implemented (Phase 6, ADR-010):** type+size validation with magic-byte sniffing, app-generated random storage keys (no user filename), storage-root containment check, object-level authz on upload **and** download, short-lived HMAC signed URLs, files kept outside the web root. (Malware scanning + retention automation remain for Phase 9.)
-- [ ] No secrets/PII/tokens in logs; redaction verified.
+- [x] No secrets/PII/tokens in logs; **redaction implemented + unit-tested (Phase 8, `lib/logger.ts`).**
 
 ## 6. CSP / external-dependency notes
 

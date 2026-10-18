@@ -40,9 +40,9 @@ Execution rule for every phase after approval: (1) inspect current state & prior
 **Scope:** functional authorized admin pages for every nav item (users/roles, customers, shipments + status, operations, finance create/pay, documents, reports, notifications, settings, transfer); transfer workflow (ADR-011); reporting read-models; RTL + DS-vocabulary i18n with English fallback; loading/empty/error/success states.
 **Acceptance:** ✅ 8 admin integration tests (69 total) + 7 E2E pass · ✅ typecheck/lint/build clean · ✅ no placeholder/fake buttons (every button wired to a tested service). Visual-regression baselines are captured in Phase 8.
 
-## Phase 8 — Security hardening, integration, E2E, visual regression
-**Scope:** CSP + secure headers (tested), CSRF, dependency audit in CI, structured logging + redaction, health checks/monitoring hooks; full integration + E2E + visual-regression sweep.
-**Acceptance:** full mandatory scenario set (TEST_STRATEGY §2) passes; CSP verified against fonts/icons/images; no secrets in bundles/logs/source maps.
+## Phase 8 — Security hardening, integration, E2E, visual regression ✅ (complete 2026-10-18 — see progress/PHASE_8_REPORT.md)
+**Scope:** nonce CSP + secure headers (middleware, tested in E2E), CSRF posture, `npm audit` in CI, structured logging + redaction, health check; full integration + E2E + visual-regression sweep; sourcemaps/powered-by off.
+**Acceptance:** ✅ full mandatory scenario set passes (14 unit + 69 integration + 9 smoke + 2 visual E2E) · ✅ CSP verified not to break hydration · ✅ no secrets in bundles/logs/source maps · ✅ CI workflow added.
 
 ## Phase 9 — Deployment preparation & launch review
 **Scope:** dev/test/prod separation; env-var validation; secret config; production migrations; HTTPS + secure cookies; private storage; **DB backup + tested restore**; error monitoring/logs; CI security checks; rollback & incident-response plan; production launch checklist.
