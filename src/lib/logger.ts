@@ -37,3 +37,25 @@ export const logger = {
   warn: (message: string, meta?: Record<string, unknown>) => emit("warn", message, meta),
   error: (message: string, meta?: Record<string, unknown>) => emit("error", message, meta),
 };
+
+/**
+ * Error-monitoring hook. Logs the error (redacted) and forwards it to an
+ * external monitor if one is registered (e.g. Sentry) via setErrorReporter.
+ * Wiring the reporter is a deployment concern; the call sites are stable.
+ */
+type ErrorReporter = (error: unknown, context?: Record<string, unknown>) => void;
+let reporter: ErrorReporter | null = null;
+
+export function setErrorReporter(fn: ErrorReporter | null): void {
+  reporter = fn;
+}
+
+export function captureError(error: unknown, context?: Record<string, unknown>): void {
+  const message = error instanceof Error ? error.message : String(error);
+  emit("error", message, { ...context, name: error instanceof Error ? error.name : "Error" });
+  try {
+    reporter?.(error, context);
+  } catch {
+    /* never let monitoring crash the request */
+  }
+}

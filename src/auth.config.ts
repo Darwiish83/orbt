@@ -26,6 +26,8 @@ export const authConfig = {
   pages: { signIn: "/login" },
   session: { strategy: "jwt", maxAge: 60 * 60 * 8 }, // 8h
   trustHost: true,
+  // Secure, httpOnly, SameSite session cookies in production (served over HTTPS).
+  useSecureCookies: process.env.NODE_ENV === "production",
   providers: [], // added in auth.ts
   callbacks: {
     authorized({ auth, request: { nextUrl } }) {

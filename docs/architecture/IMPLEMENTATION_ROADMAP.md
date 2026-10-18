@@ -44,9 +44,9 @@ Execution rule for every phase after approval: (1) inspect current state & prior
 **Scope:** nonce CSP + secure headers (middleware, tested in E2E), CSRF posture, `npm audit` in CI, structured logging + redaction, health check; full integration + E2E + visual-regression sweep; sourcemaps/powered-by off.
 **Acceptance:** ✅ full mandatory scenario set passes (14 unit + 69 integration + 9 smoke + 2 visual E2E) · ✅ CSP verified not to break hydration · ✅ no secrets in bundles/logs/source maps · ✅ CI workflow added.
 
-## Phase 9 — Deployment preparation & launch review
-**Scope:** dev/test/prod separation; env-var validation; secret config; production migrations; HTTPS + secure cookies; private storage; **DB backup + tested restore**; error monitoring/logs; CI security checks; rollback & incident-response plan; production launch checklist.
-**Acceptance:** backup/restore verified; launch checklist satisfied; **no production-readiness claim while any critical security test fails**; no real `.env`/credentials/dumps committed.
+## Phase 9 — Deployment preparation & launch review ✅ (complete 2026-10-18 — see progress/PHASE_9_REPORT.md)
+**Scope:** dev/test/prod separation; **boot-time env validation**; secure cookies/HTTPS; standalone `Dockerfile` + prod compose; `prisma migrate deploy`; private storage volume; **DB backup + tested restore scripts**; error-monitoring hook; CI; rollback & incident-response runbook; launch checklist.
+**Acceptance:** ✅ backup→restore verified (identical row counts) · ✅ standalone build with traced Prisma client · ✅ env fails fast on missing prod secrets · ✅ runbooks + checklist written · ✅ no real `.env`/credentials/dumps committed. Go-live gated on owner items (MFA decision, customs/tax/FX rules, malware scanning).
 
 ---
 

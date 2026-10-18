@@ -6,6 +6,8 @@ const nextConfig = {
   // are set per-request in middleware.ts (nonce-based).
   poweredByHeader: false,
   productionBrowserSourceMaps: false,
+  // Minimal, self-contained production server for containerized deploys.
+  output: "standalone",
 };
 
 export default nextConfig;
