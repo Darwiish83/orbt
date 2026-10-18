@@ -1,0 +1,551 @@
+// OrbitCargo domain model (Phase 2).
+// Derived from docs/architecture/DATA_MODEL_PLAN.md and the decisions log.
+// Principles: normalized; decimal money/weights (ADR-004, USD); country+year
+// scoping (ADR-002); append-only audit/events; no destructive cascades on
+// financial/audit history (onDelete: Restrict). CHECK constraints that Prisma
+// cannot express are added in the migration SQL (see prisma/migrations/).
+//
+// NOTE: charge-line canonical fields remain an OPEN decision (Phase 5). The
+// ChargeLineItem below is intentionally generic (category/quantity/unitPrice/
+// amount); the DS-specific fields (quality, brand, fatura, …) are added after
+// confirmation so we don't bake in an unapproved structure.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------------------------------ enums
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+}
+
+enum Department {
+  MANAGEMENT
+  OPERATIONS
+  FINANCE
+  CUSTOMER_SERVICE
+  DOCUMENTS
+  REPORTS
+}
+
+enum TransferRole {
+  NONE
+  SEND
+  RECEIVE
+}
+
+enum AccessLevel {
+  NONE
+  VIEW
+  EDIT
+}
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum ShipmentMode {
+  AIR
+  SEA
+  ROAD
+}
+
+// Operational status set (from the design system). Reconciliation with the
+// customer-facing vocabulary in readme.md is an OPEN decision (Phase 4).
+enum ShipmentStatus {
+  AT_ORIGIN_STORE
+  DEPARTED
+  IN_TRANSIT
+  ARRIVED
+  DELIVERED
+  ON_HOLD
+}
+
+enum ShipmentEventType {
+  SCAN
+  MILESTONE
+  DELAY
+  EXCEPTION
+  DELIVERY
+  STATUS_CHANGE
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  EXPIRED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  VOID
+}
+
+enum ChargeParentType {
+  QUOTE
+  INVOICE
+}
+
+enum ChargeCategory {
+  FREIGHT
+  LOCAL_DELIVERY
+  CUSTOMS_TAX
+  SERVICE
+  OTHER
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  MOBILE_MONEY
+  OTHER
+}
+
+enum DocumentKind {
+  INVOICE
+  IDENTITY
+  CARGO_DOC
+  OTHER
+}
+
+enum DocumentVisibility {
+  PRIVATE
+  CUSTOMER_VISIBLE
+}
+
+enum NotificationAudience {
+  CUSTOMER
+  ROLE
+  ALL
+}
+
+enum NotificationStatus {
+  DRAFT
+  SCHEDULED
+  SENT
+}
+
+// ------------------------------------------------------- identity & access
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String? // set during Phase 3 (auth)
+  status       UserStatus @default(INVITED)
+  mfaEnabled   Boolean    @default(false)
+
+  // A user is EITHER staff (employee) OR a customer contact — enforced by a
+  // CHECK constraint in the migration (not both set).
+  employeeId String?   @unique
+  employee   Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  customerId String?   @unique
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  roles       UserRole[]
+  auditEvents AuditEvent[] @relation("AuditActor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+model Role {
+  id          String  @id @default(cuid())
+  key         String  @unique // e.g. "operation_admin"
+  name        String
+  description String?
+  isSystem    Boolean @default(false)
+
+  permissions   RolePermission[]
+  users         UserRole[]
+  notifications Notification[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Permission {
+  id          String  @id @default(cuid())
+  key         String  @unique // e.g. "finance:write"
+  description String?
+
+  roles RolePermission[]
+
+  createdAt DateTime @default(now())
+}
+
+model RolePermission {
+  roleId       String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+// Role assignment, optionally scoped by country and/or business year (ADR-002).
+// Null scope means the role applies globally.
+model UserRole {
+  id           String  @id @default(cuid())
+  userId       String
+  user         User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleId       String
+  role         Role    @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  country      String?
+  businessYear Int?
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, roleId, country, businessYear])
+  @@index([roleId])
+}
+
+model Employee {
+  id           String       @id @default(cuid())
+  code         String       @unique // EMP-###
+  name         String
+  phone        String?
+  email        String?
+  department   Department
+  active       Boolean      @default(true)
+  transferRole TransferRole @default(NONE)
+
+  user       User?
+  scopes     EmployeeScope[]
+  pageAccess EmployeePageAccess[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Country the employee is scoped to (e.g. Turkey, India). Used for transfer
+// (trCountries) and general country scoping.
+model EmployeeScope {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  country    String
+
+  @@unique([employeeId, country])
+}
+
+// Per-employee page-level access override (ADR-002).
+model EmployeePageAccess {
+  id         String      @id @default(cuid())
+  employeeId String
+  employee   Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  page       String
+  level      AccessLevel @default(NONE)
+
+  @@unique([employeeId, page])
+}
+
+// ----------------------------------------------------------------- customers
+
+model Customer {
+  id              String         @id @default(cuid())
+  ref             String         @unique // OR-####
+  name            String
+  phone           String?
+  email           String?
+  country         String?
+  status          CustomerStatus @default(ACTIVE)
+  createdByUserId String?
+
+  user          User?
+  shipmentLines ShipmentLine[]
+  quotes        Quote[]
+  invoices      Invoice[]
+  payments      Payment[]
+  documents     Document[]
+  notifications Notification[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+// ----------------------------------------------------------------- shipments
+
+// A Shipment is a consolidation (W-<n> air / C-<n> sea). Customers attach via
+// ShipmentLine. Code is unique within (businessYear, mode, originCountry);
+// globally unique collision-resistant code enforced by @@unique on `code`.
+model Shipment {
+  id              String         @id @default(cuid())
+  code            String         @unique
+  trackingNumber  String?        @unique // generated in Phase 4
+  mode            ShipmentMode
+  originCountry   String
+  originCity      String?
+  destCountry     String?
+  destCity        String?
+  status          ShipmentStatus @default(AT_ORIGIN_STORE)
+  businessYear    Int
+  departedAt      DateTime?
+  arrivedAt       DateTime?
+  createdByUserId String?
+
+  airDetail  AirDetail?
+  seaDetail  SeaDetail?
+  roadDetail RoadDetail?
+  lines      ShipmentLine[]
+  events     ShipmentEvent[]
+  quotes     Quote[]
+  invoices   Invoice[]
+  documents  Document[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessYear, mode, originCountry, code])
+  @@index([status])
+  @@index([businessYear])
+}
+
+model AirDetail {
+  id                 String   @id @default(cuid())
+  shipmentId         String   @unique
+  shipment           Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  awbNumber          String?
+  flightRef          String?
+  chargeableWeightKg Decimal? @db.Decimal(12, 3)
+}
+
+model SeaDetail {
+  id            String   @id @default(cuid())
+  shipmentId    String   @unique
+  shipment      Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  blNumber      String?
+  containerRefs String[]
+  volumeCbm     Decimal? @db.Decimal(12, 3)
+}
+
+model RoadDetail {
+  id         String   @id @default(cuid())
+  shipmentId String   @unique
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  vehicleRef String?
+  driverRef  String?
+  route      String?
+}
+
+// Cargo line associating a customer's goods with a consolidation shipment.
+model ShipmentLine {
+  id                 String   @id @default(cuid())
+  shipmentId         String
+  shipment           Shipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  customerId         String
+  customer           Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  description        String?
+  packages           Int?
+  chargeableWeightKg Decimal? @db.Decimal(12, 3)
+  volumeCbm          Decimal? @db.Decimal(12, 3)
+
+  createdAt DateTime @default(now())
+
+  @@index([shipmentId])
+  @@index([customerId])
+}
+
+// Append-only shipment scan/milestone history.
+model ShipmentEvent {
+  id             String            @id @default(cuid())
+  shipmentId     String
+  shipment       Shipment          @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  type           ShipmentEventType
+  status         ShipmentStatus?
+  note           String?
+  actorUserId    String?
+  idempotencyKey String?           @unique
+  occurredAt     DateTime          @default(now())
+  createdAt      DateTime          @default(now())
+
+  @@index([shipmentId, occurredAt])
+}
+
+// ------------------------------------------------------------------- finance
+
+model Quote {
+  id              String      @id @default(cuid())
+  number          String?     @unique
+  customerId      String
+  customer        Customer    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  shipmentId      String?
+  shipment        Shipment?   @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
+  currency        String      @default("USD")
+  status          QuoteStatus @default(DRAFT)
+  expiresAt       DateTime?
+  total           Decimal     @default(0) @db.Decimal(14, 2)
+  businessYear    Int?
+  createdByUserId String?
+
+  lines ChargeLineItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([status])
+}
+
+model Invoice {
+  id              String        @id @default(cuid())
+  number          String        @unique
+  customerId      String
+  customer        Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  shipmentId      String?
+  shipment        Shipment?     @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
+  currency        String        @default("USD")
+  status          InvoiceStatus @default(UNPAID)
+  issuedAt        DateTime?
+  // Authoritative total, recomputed server-side from line items (Phase 5).
+  total           Decimal       @default(0) @db.Decimal(14, 2)
+  amountAllocated Decimal       @default(0) @db.Decimal(14, 2)
+  businessYear    Int?
+  createdByUserId String?
+
+  lines       ChargeLineItem[]
+  allocations PaymentAllocation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([status])
+}
+
+// Exactly one parent (quote XOR invoice) — enforced by CHECK in the migration.
+model ChargeLineItem {
+  id          String           @id @default(cuid())
+  parentType  ChargeParentType
+  quoteId     String?
+  quote       Quote?           @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  invoiceId   String?
+  invoice     Invoice?         @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  category    ChargeCategory
+  description String?
+  quantity    Decimal          @default(1) @db.Decimal(12, 3)
+  unitPrice   Decimal          @db.Decimal(14, 2)
+  amount      Decimal          @db.Decimal(14, 2)
+  currency    String           @default("USD")
+
+  createdAt DateTime @default(now())
+
+  @@index([quoteId])
+  @@index([invoiceId])
+}
+
+model Payment {
+  id             String        @id @default(cuid())
+  customerId     String
+  customer       Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  amount         Decimal       @db.Decimal(14, 2)
+  currency       String        @default("USD")
+  method         PaymentMethod
+  reference      String?
+  idempotencyKey String?       @unique
+  receivedAt     DateTime      @default(now())
+  actorUserId    String?
+
+  allocations PaymentAllocation[]
+
+  createdAt DateTime @default(now())
+
+  @@index([customerId])
+}
+
+model PaymentAllocation {
+  id        String  @id @default(cuid())
+  paymentId String
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  amount    Decimal @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now())
+
+  @@unique([paymentId, invoiceId])
+  @@index([invoiceId])
+}
+
+// ----------------------------------------------------------------- documents
+
+model Document {
+  id               String             @id @default(cuid())
+  kind             DocumentKind
+  storageKey       String             @unique // server-generated, never the user filename
+  contentType      String
+  size             Int
+  checksum         String?
+  visibility       DocumentVisibility @default(PRIVATE)
+  customerId       String?
+  customer         Customer?          @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  shipmentId       String?
+  shipment         Shipment?          @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
+  uploadedByUserId String?
+  deletedAt        DateTime? // soft delete + retention
+
+  createdAt DateTime @default(now())
+
+  @@index([customerId])
+  @@index([shipmentId])
+}
+
+// ------------------------------------------------------------- notifications
+
+model Notification {
+  id              String               @id @default(cuid())
+  audience        NotificationAudience
+  type            String?
+  title           String
+  message         String
+  status          NotificationStatus   @default(DRAFT)
+  scheduledAt     DateTime?
+  sentAt          DateTime?
+  customerId      String?
+  customer        Customer?            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  roleId          String?
+  role            Role?                @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  createdByUserId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([status])
+  @@index([customerId])
+}
+
+// ----------------------------------------------------------------- audit log
+
+// Append-only. The application never updates or deletes rows here.
+model AuditEvent {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  actor       User?    @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  action      String
+  entityType  String?
+  entityId    String?
+  metadata    Json?
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorUserId, createdAt])
+}

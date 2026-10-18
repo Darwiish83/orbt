@@ -9,6 +9,9 @@ import { z } from "zod";
 const serverSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   APP_URL: z.string().url().default("http://localhost:3000"),
+  DATABASE_URL: z.string().url().refine((u) => u.startsWith("postgres"), {
+    message: "DATABASE_URL must be a PostgreSQL connection string",
+  }),
 });
 
 export type ServerEnv = z.infer<typeof serverSchema>;

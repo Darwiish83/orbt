@@ -16,9 +16,9 @@ Execution rule for every phase after approval: (1) inspect current state & prior
 **Acceptance:** ✅ typecheck/lint clean · ✅ build + prerender · ✅ 12 unit + 4 E2E pass · ✅ token values match DS · ✅ brand parity confirmed in-browser · ✅ SO/AR + RTL working.
 **Decisions confirmed:** D1 Tailwind-over-tokens (ADR-003), D4 `lucide-react`, D5 React 19.
 
-## Phase 2 — Domain model & database
+## Phase 2 — Domain model & database ✅ (complete 2026-10-18 — see progress/PHASE_2_REPORT.md)
 **Scope:** Prisma schema for confirmed entities (DATA_MODEL_PLAN); initial versioned migrations; constraints (FK/unique/check), indexes, deletion policies; decimal money/weight columns; test DB provisioning; **no production seed**.
-**Acceptance:** migrations apply cleanly to a fresh DB; constraint/integrity integration tests pass; schema ↔ migration consistency verified.
+**Acceptance:** ✅ migration applies cleanly to fresh dev + test DBs · ✅ 9 integration tests (constraints/integrity/decimal) pass · ✅ `migrate status` no drift · ✅ reference-data seed only · ✅ typecheck/lint/unit regression clean.
 
 ## Phase 3 — Auth, sessions, roles, permissions
 **Scope:** Auth.js (credentials + server sessions); Argon2id hashing; password reset (hashed, expiring, single-use tokens); rate limiting on login/reset; session rotation/invalidation; role/permission model + **server authorization guards** (deny-by-default, object-level); MFA for privileged accounts (or documented gap + plan); replace all DS fake-auth.
