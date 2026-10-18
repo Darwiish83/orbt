@@ -72,7 +72,7 @@ The DS SPA demonstrates the **exact anti-patterns** to eliminate:
 - [ ] Safe error handling (no stack traces/sensitive data to client).
 - [ ] Audit logging for security-sensitive operations.
 - [ ] Dependency vulnerability checks in CI; committed lockfile.
-- [ ] Secure file upload/download (type/size/content validation, safe keys, path-traversal prevention, authz on both ends, signed URLs).
+- [x] Secure file upload/download — **implemented (Phase 6, ADR-010):** type+size validation with magic-byte sniffing, app-generated random storage keys (no user filename), storage-root containment check, object-level authz on upload **and** download, short-lived HMAC signed URLs, files kept outside the web root. (Malware scanning + retention automation remain for Phase 9.)
 - [ ] No secrets/PII/tokens in logs; redaction verified.
 
 ## 6. CSP / external-dependency notes

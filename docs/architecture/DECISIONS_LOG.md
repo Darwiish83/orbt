@@ -17,6 +17,8 @@ Authoritative record of resolved decisions. Supersedes the "open decision" notes
 
 | ADR-009 | 2026-10-18 | **Charge-line model** | **Generic categorized line items** (`category` + `description` + `quantity` × `unitPrice` → server-computed `amount`); DS-specific components (quality, brand, fatura, …) expressed as additional categorized lines, not fixed columns. | Matches the baseline ("explicit charge line items", configurable categories); extensible and avoids baking in an unapproved structure. Additive if Orbit later confirms the specific component model. Totals are always recomputed server-side from lines — the client never supplies authoritative amounts. |
 
+| ADR-010 | 2026-10-18 | **Document storage backend** | **Private filesystem store outside the web root behind a `Storage` interface; server-mediated authorized downloads + optional short-lived HMAC-signed URLs.** | No S3/MinIO provisioned; the threat model forbids public-dir storage. The interface isolates the backend so production swaps in S3-compatible storage without touching callers. Keys are app-generated random (no user filename → no traversal); every download passes object-level authz or a signed token bound to the document id. |
+
 ## Still open (to resolve by the phase noted)
 - **Transfer (send/receive) workflow** — schema supports `transferRole`/country scoping, but the operational send/receive flow (who initiates/settles) is **deferred to Phase 7** (admin operations). *(Phase 7)*
 - **Specific charge-component model** — if Orbit confirms the DS `quality/brandPcs/brandRate/fatura/delivery/discount` fields as first-class, add them to `ChargeLineItem` (additive to ADR-009). *(owner confirmation)*

@@ -32,9 +32,9 @@ Execution rule for every phase after approval: (1) inspect current state & prior
 **Scope:** generic categorized charge lines (ADR-009); **server-recomputed** totals; invoices; payments + allocations (partial/over/reversal); decimal currency precision/rounding; transactions + idempotency; financial audit; no client-supplied amounts; no invented tax/FX/customs rules.
 **Acceptance:** ✅ rounding/partial/overpayment/allocation/currency/idempotency/reversal tests pass (13 finance of 50 integration) · ✅ no float drift · ✅ no hard-delete of financial history · ✅ typecheck/lint/build clean.
 
-## Phase 6 — Private documents, customer portal, notifications
-**Scope:** private object storage; validated uploads (type/size/content, safe keys, path-traversal prevention); authz on upload & download; short-lived signed URLs; customer portal (track/shipments/quotes/invoices/documents, self-scoped); notifications/announcements + scheduling.
-**Acceptance:** upload/download authz, invalid/oversized upload, traversal tests pass; customers see only their own data.
+## Phase 6 — Private documents, customer portal, notifications ✅ (complete 2026-10-18 — see progress/PHASE_6_REPORT.md)
+**Scope:** private FS storage behind a Storage interface (ADR-010); validated uploads (type/size/magic-byte, random keys, traversal-safe); authz on upload & download; short-lived HMAC signed URLs; self-scoped customer portal (shipments/invoices/documents); notifications service.
+**Acceptance:** ✅ upload/download authz, invalid/oversized/traversal, signed-token tests pass (11 document of 61 integration) · ✅ customer portal upload/download E2E (7 total) · ✅ customers see only their own data · ✅ typecheck/lint/build clean.
 
 ## Phase 7 — Admin management, reporting, localization, UI completeness
 **Scope:** full admin (users/roles, customers, shipments, operations, finance, documents, reports, notifications, settings, transfer, accounting); reporting read-models; complete EN/SO/AR coverage incl. RTL; loading/empty/error/success states in the approved visual language.

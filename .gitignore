@@ -11,6 +11,9 @@ next-env.d.ts
 # production
 /build
 
+# private document storage (never committed)
+/storage
+
 # testing
 /coverage
 /test-results

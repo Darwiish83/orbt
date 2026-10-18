@@ -11,6 +11,7 @@ import { logout } from "@/app/login/actions";
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const user = await getSessionUser();
   if (!user) redirect("/login");
+  if (user.customerId) redirect("/account"); // customers use the portal, not admin
 
   return (
     <AdminShell userEmail={user.email} onLogout={logout}>

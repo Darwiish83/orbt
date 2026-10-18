@@ -527,6 +527,7 @@ model Document {
   id               String             @id @default(cuid())
   kind             DocumentKind
   storageKey       String             @unique // server-generated, never the user filename
+  filename         String? // sanitized original name, for display/download only
   contentType      String
   size             Int
   checksum         String?
