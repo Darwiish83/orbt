@@ -28,9 +28,9 @@ Execution rule for every phase after approval: (1) inspect current state & prior
 **Scope:** customer CRUD (scoped); shipment service with mode-specific detail; **documented state machine** + server-validated transitions + append-only idempotent events; secure unique tracking numbers; public tracking (approved subset, ADR-008); status vocabulary resolved (ADR-007); server-side pagination/filtering; country/year scoping. Transfer workflow deferred to Phase 7.
 **Acceptance:** ✅ invalid-transition, IDOR, tracking-privacy, pagination, duplicate-event tests pass (37 integration + 6 E2E) · ✅ typecheck/lint/build clean · real `/track`, `/shipments`, `/customers` pages on-brand.
 
-## Phase 5 — Quotes, charges, invoices, payments, financial integrity
-**Scope:** charge line items (confirmed canonical fields); **server-recomputed** totals; invoices; payments + allocations (partial/over/refund/reversal); currency precision/rounding; transactions + idempotency; financial audit entries; no client-supplied authoritative amounts; no invented tax/FX/customs rules (configurable + documented).
-**Acceptance:** rounding/partial/overpayment/allocation tests pass; no float drift; concurrency & idempotency tests pass; no hard-delete of financial history.
+## Phase 5 — Quotes, charges, invoices, payments, financial integrity ✅ (complete 2026-10-18 — see progress/PHASE_5_REPORT.md)
+**Scope:** generic categorized charge lines (ADR-009); **server-recomputed** totals; invoices; payments + allocations (partial/over/reversal); decimal currency precision/rounding; transactions + idempotency; financial audit; no client-supplied amounts; no invented tax/FX/customs rules.
+**Acceptance:** ✅ rounding/partial/overpayment/allocation/currency/idempotency/reversal tests pass (13 finance of 50 integration) · ✅ no float drift · ✅ no hard-delete of financial history · ✅ typecheck/lint/build clean.
 
 ## Phase 6 — Private documents, customer portal, notifications
 **Scope:** private object storage; validated uploads (type/size/content, safe keys, path-traversal prevention); authz on upload & download; short-lived signed URLs; customer portal (track/shipments/quotes/invoices/documents, self-scoped); notifications/announcements + scheduling.

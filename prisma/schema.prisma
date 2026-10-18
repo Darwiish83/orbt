@@ -495,6 +495,10 @@ model Payment {
   idempotencyKey String?       @unique
   receivedAt     DateTime      @default(now())
   actorUserId    String?
+  // Reversal (no hard delete of financial history). Allocation rows are kept;
+  // a reversed payment's allocations are excluded when recomputing invoices.
+  reversedAt     DateTime?
+  reversalReason String?
 
   allocations PaymentAllocation[]
 
