@@ -12,9 +12,10 @@ Authoritative record of resolved decisions. Supersedes the "open decision" notes
 | ADR-005 | 2026-10-18 | **Auth session strategy** | **Auth.js v5 (Credentials) + JWT sessions, with a per-user `sessionEpoch` re-checked server-side.** | The baseline mandates Auth.js; Auth.js Credentials only supports JWT sessions (DB sessions need an external IdP). JWT can't be revoked server-side alone, so the authorization layer loads the user on every protected access and compares `sessionEpoch`; password reset / forced logout bumps it to invalidate all tokens immediately. Argon2id for hashing. |
 | ADR-006 | 2026-10-18 | **MFA scope (Phase 3)** | **Deferred (documented gap + rollout plan).** `mfaEnabled` hook exists; TOTP enrollment/verification is built in a later phase. | The baseline permits documenting the gap when MFA isn't in the implemented auth config. Keeps Phase 3 bounded to core auth + authorization. See THREAT_MODEL §residual risks. |
 
-## Still open (not blocking Phase 1; to resolve by the phase noted)
-- **Transfer (send/receive) workflow** — confirm scope & who initiates/settles. *(Phase 4)*
-- **Shipment status vocabulary** — reconcile operational set (`At Origin Store/Departed/In Transit/Arrived`) with the customer-facing set in `readme.md`. *(Phase 4)*
+| ADR-007 | 2026-10-18 | **Shipment status vocabulary** | **Operational set in the DB; customer-facing labels as a presentation mapping.** | The DB uses `AT_ORIGIN_STORE/DEPARTED/IN_TRANSIT/ARRIVED/DELIVERED/ON_HOLD` (design-system operational set, drives the state machine). The readme's customer-facing words (Booked/Departed/In transit/Arrived/Delayed/Delivered) are produced by `publicStatusLabel` for public tracking only. |
+| ADR-008 | 2026-10-18 | **Public tracking privacy** | **Approved subset only:** tracking number, customer-facing status, mode, origin/destination (city, country), and status-change milestone timestamps. | Excludes PII, financials, documents, internal notes, staff identities and raw internal codes. Enforced by an explicit `select` in `publicTracking.ts` and a test asserting the exact key set. |
+
+## Still open (to resolve by the phase noted)
+- **Transfer (send/receive) workflow** — schema supports `transferRole`/country scoping, but the operational send/receive flow (who initiates/settles) is **deferred to Phase 7** (admin operations). *(Phase 7)*
 - **Charge-line canonical fields** — confirm `measure/rate/quality/brandPcs/brandRate/fatura/delivery/other/discount` as the canonical model and which are configurable. *(Phase 5)*
-- **Public tracking privacy** — exact approved subset exposed via a tracking number. *(Phase 4)*
-- **MFA availability** — depends on chosen Auth.js config; implement or document gap + rollout. *(Phase 3)*
+- **MFA (TOTP)** — deferred with rollout plan (ADR-006); implement before production launch. *(later phase)*

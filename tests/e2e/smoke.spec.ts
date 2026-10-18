@@ -13,6 +13,11 @@ test("unauthenticated access to the admin area redirects to login", async ({ pag
   await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
 });
 
+test("public tracking shows a not-found message for an unknown number", async ({ page }) => {
+  await page.goto("/track?n=ORB-2026-ZZZZZZ");
+  await expect(page.getByRole("status")).toContainText(/no shipment found/i);
+});
+
 test("rejects invalid credentials with a generic error", async ({ page }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("nobody@orbit.so");
@@ -43,5 +48,20 @@ test.describe("authenticated session", () => {
     await expect(page).toHaveURL(/\/login/);
     await page.goto("/dashboard");
     await expect(page).toHaveURL(/\/login/);
+  });
+
+  test("creates a customer through the authorized admin form", async ({ page }) => {
+    await page.goto("/login");
+    await page.getByLabel("Email").fill(E2E_EMAIL);
+    await page.getByLabel("Password").fill(E2E_PASSWORD);
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
+
+    await page.goto("/customers");
+    const name = `E2E Customer ${Date.now()}`;
+    await page.getByLabel("New customer").fill(name);
+    await page.getByRole("button", { name: /add customer/i }).click();
+    await expect(page.getByRole("status")).toContainText(/customer added/i, { timeout: 15_000 });
+    await expect(page.getByText(name)).toBeVisible();
   });
 });

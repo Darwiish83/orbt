@@ -16,11 +16,19 @@ export default async function globalSetup() {
   const prisma = new PrismaClient({ datasources: { db: { url: devDatabaseUrl() } } });
   try {
     const passwordHash = await hash(E2E_PASSWORD, { memoryCost: 19456, timeCost: 2, parallelism: 1 });
-    await prisma.user.upsert({
+    const user = await prisma.user.upsert({
       where: { email: E2E_EMAIL },
       update: { passwordHash, status: "ACTIVE" },
       create: { email: E2E_EMAIL, passwordHash, status: "ACTIVE" },
     });
+    // Grant super_admin so the write-path E2E (create customer) is authorized.
+    const role = await prisma.role.upsert({
+      where: { key: "super_admin" },
+      update: {},
+      create: { key: "super_admin", name: "Super Admin", isSystem: true },
+    });
+    const existing = await prisma.userRole.findFirst({ where: { userId: user.id, roleId: role.id } });
+    if (!existing) await prisma.userRole.create({ data: { userId: user.id, roleId: role.id } });
   } finally {
     await prisma.$disconnect();
   }

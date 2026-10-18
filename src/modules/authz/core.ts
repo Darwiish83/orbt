@@ -118,3 +118,18 @@ export function assertCustomerAccess(
 export function isCustomerPrincipal(user: AuthzUser): boolean {
   return user.customerId !== null;
 }
+
+/**
+ * The set of countries a staff user is scoped to, or `null` meaning "all"
+ * (super admin, or any role scope with a null country). Used to filter list
+ * queries server-side.
+ */
+export function allowedCountries(user: AuthzUser): string[] | null {
+  if (user.isSuperAdmin) return null;
+  const countries = new Set<string>();
+  for (const s of user.scopes) {
+    if (s.country === null) return null; // a global-country scope → all
+    countries.add(s.country);
+  }
+  return [...countries];
+}

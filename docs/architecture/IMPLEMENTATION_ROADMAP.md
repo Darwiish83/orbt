@@ -24,9 +24,9 @@ Execution rule for every phase after approval: (1) inspect current state & prior
 **Scope:** Auth.js (credentials + JWT with sessionEpoch re-check, ADR-005); Argon2id hashing; password reset (hashed, expiring, single-use); DB-backed rate limiting; **server authorization guards** (deny-by-default, object-level); MFA documented gap + plan (ADR-006); replaced all DS fake-auth.
 **Acceptance:** ✅ negative-authorization suite passes (unauthorized, cross-customer IDOR, unauthorized-finance, escalation, self-grant) · ✅ session-invalidation + reset single-use/expiry + rate-limit tests pass · ✅ 26 integration + 4 E2E pass · ✅ typecheck/lint/build clean · no client-trusted authz.
 
-## Phase 4 — Customers, shipments, tracking, operations
-**Scope:** customer CRUD (scoped); shipment model with **mode-specific detail** (air/sea/road); **documented shipment state machine** + server-validated transitions + append-only events; secure unique tracking-number generation; public tracking exposing approved subset only; operations/tasks; **server-side pagination/filtering**; country/year scoping.
-**Acceptance:** invalid-transition, IDOR, tracking-privacy, pagination, duplicate-event tests pass; screens match approved design.
+## Phase 4 — Customers, shipments, tracking, operations ✅ (complete 2026-10-18 — see progress/PHASE_4_REPORT.md)
+**Scope:** customer CRUD (scoped); shipment service with mode-specific detail; **documented state machine** + server-validated transitions + append-only idempotent events; secure unique tracking numbers; public tracking (approved subset, ADR-008); status vocabulary resolved (ADR-007); server-side pagination/filtering; country/year scoping. Transfer workflow deferred to Phase 7.
+**Acceptance:** ✅ invalid-transition, IDOR, tracking-privacy, pagination, duplicate-event tests pass (37 integration + 6 E2E) · ✅ typecheck/lint/build clean · real `/track`, `/shipments`, `/customers` pages on-brand.
 
 ## Phase 5 — Quotes, charges, invoices, payments, financial integrity
 **Scope:** charge line items (confirmed canonical fields); **server-recomputed** totals; invoices; payments + allocations (partial/over/refund/reversal); currency precision/rounding; transactions + idempotency; financial audit entries; no client-supplied authoritative amounts; no invented tax/FX/customs rules (configurable + documented).
