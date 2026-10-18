@@ -3,7 +3,9 @@ import type { ShipmentStatus } from "@prisma/client";
 import { prisma } from "@/db/client";
 import { listShipments } from "@/modules/shipments/service";
 import { requireUser } from "@/modules/authz/session";
+import { can } from "@/modules/authz/core";
 import { Badge, type BadgeTone } from "@/ui/primitives";
+import { NewShipmentForm } from "./NewShipmentForm";
 
 export const metadata = { title: "Shipments" };
 
@@ -33,6 +35,7 @@ export default async function ShipmentsPage({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {can(user, "shipments:write") && <NewShipmentForm />}
       <div
         style={{
           background: "var(--surface-card)",
@@ -74,8 +77,10 @@ export default async function ShipmentsPage({
             ) : (
               result.items.map((s) => (
                 <tr key={s.id} style={{ borderBottom: "1px solid var(--border-default)" }}>
-                  <td style={{ padding: "12px 14px", fontFamily: "var(--font-mono)", color: "var(--navy-700)", fontWeight: 600 }}>
-                    {s.code}
+                  <td style={{ padding: "12px 14px", fontFamily: "var(--font-mono)", fontWeight: 600 }}>
+                    <Link href={`/shipments/${s.id}`} style={{ color: "var(--navy-700)" }}>
+                      {s.code}
+                    </Link>
                   </td>
                   <td style={{ padding: "12px 14px" }}>{s.mode}</td>
                   <td style={{ padding: "12px 14px", color: "var(--text-body)" }}>

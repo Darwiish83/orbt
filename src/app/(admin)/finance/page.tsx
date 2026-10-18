@@ -2,7 +2,9 @@ import type { InvoiceStatus } from "@prisma/client";
 import { prisma } from "@/db/client";
 import { listInvoices } from "@/modules/finance/invoices";
 import { requireUser } from "@/modules/authz/session";
+import { can } from "@/modules/authz/core";
 import { Badge, type BadgeTone } from "@/ui/primitives";
+import { FinanceForms } from "./FinanceForms";
 
 export const metadata = { title: "Finance" };
 
@@ -28,6 +30,7 @@ export default async function FinancePage({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {can(user, "invoices:write") && <FinanceForms />}
       <div
         style={{
           background: "var(--surface-card)",

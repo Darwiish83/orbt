@@ -19,8 +19,9 @@ Authoritative record of resolved decisions. Supersedes the "open decision" notes
 
 | ADR-010 | 2026-10-18 | **Document storage backend** | **Private filesystem store outside the web root behind a `Storage` interface; server-mediated authorized downloads + optional short-lived HMAC-signed URLs.** | No S3/MinIO provisioned; the threat model forbids public-dir storage. The interface isolates the backend so production swaps in S3-compatible storage without touching callers. Keys are app-generated random (no user filename → no traversal); every download passes object-level authz or a signed token bound to the document id. |
 
+| ADR-011 | 2026-10-18 | **Transfer send/receive workflow** | **A `Transfer` entity with PENDING→SENT→RECEIVED states.** Capability = `transfer:write` permission + the acting employee's `transferRole` (SEND creates/sends, RECEIVE receives); super admins bypass. Country scope enforced from the user's role scopes (from-country to send, to-country to receive). | Implements the deferred inter-country transfer flow faithfully to the design system's send/receive agent model, reusing the existing permission + scope machinery. |
+
 ## Still open (to resolve by the phase noted)
-- **Transfer (send/receive) workflow** — schema supports `transferRole`/country scoping, but the operational send/receive flow (who initiates/settles) is **deferred to Phase 7** (admin operations). *(Phase 7)*
 - **Specific charge-component model** — if Orbit confirms the DS `quality/brandPcs/brandRate/fatura/delivery/discount` fields as first-class, add them to `ChargeLineItem` (additive to ADR-009). *(owner confirmation)*
 - **Customs / tax / FX rules** — intentionally not invented; charge categories are configurable, rates/policies to be provided by the business owner. *(owner input)*
 - **MFA (TOTP)** — deferred with rollout plan (ADR-006); implement before production launch. *(later phase)*

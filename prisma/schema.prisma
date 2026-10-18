@@ -568,6 +568,41 @@ model Notification {
   @@index([customerId])
 }
 
+// ------------------------------------------------------------------ transfer
+
+enum TransferStatus {
+  PENDING
+  SENT
+  RECEIVED
+  CANCELLED
+}
+
+// Inter-country cash/goods transfer (send/receive workflow). A SEND-role
+// employee in the from-country creates and sends; a RECEIVE-role employee in
+// the to-country marks it received.
+model Transfer {
+  id               String         @id @default(cuid())
+  reference        String         @unique // TR-<year>-<seq>
+  amount           Decimal        @db.Decimal(14, 2)
+  currency         String         @default("USD")
+  fromCountry      String
+  toCountry        String
+  status           TransferStatus @default(PENDING)
+  note             String?
+  businessYear     Int
+  createdByUserId  String?
+  sentByUserId     String?
+  sentAt           DateTime?
+  receivedByUserId String?
+  receivedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([fromCountry, toCountry, businessYear])
+}
+
 // ----------------------------------------------------------------- audit log
 
 // Append-only. The application never updates or deletes rows here.

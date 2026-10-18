@@ -18,6 +18,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { key: "shipments", label: "Shipments", icon: "Package", href: "/shipments" },
   { key: "operations", label: "Operations", icon: "Truck", href: "/operations" },
   { key: "finance", label: "Finance", icon: "Wallet", href: "/finance" },
+  { key: "transfer", label: "Transfer", icon: "ArrowLeftRight", href: "/transfer" },
   { key: "documents", label: "Documents", icon: "FileText", href: "/documents" },
   { key: "reports", label: "Reports", icon: "ChartPie", href: "/reports" },
   { key: "users", label: "Users & Team", icon: "UserCog", href: "/users" },

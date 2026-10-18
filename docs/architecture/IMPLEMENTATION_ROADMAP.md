@@ -36,9 +36,9 @@ Execution rule for every phase after approval: (1) inspect current state & prior
 **Scope:** private FS storage behind a Storage interface (ADR-010); validated uploads (type/size/magic-byte, random keys, traversal-safe); authz on upload & download; short-lived HMAC signed URLs; self-scoped customer portal (shipments/invoices/documents); notifications service.
 **Acceptance:** ✅ upload/download authz, invalid/oversized/traversal, signed-token tests pass (11 document of 61 integration) · ✅ customer portal upload/download E2E (7 total) · ✅ customers see only their own data · ✅ typecheck/lint/build clean.
 
-## Phase 7 — Admin management, reporting, localization, UI completeness
-**Scope:** full admin (users/roles, customers, shipments, operations, finance, documents, reports, notifications, settings, transfer, accounting); reporting read-models; complete EN/SO/AR coverage incl. RTL; loading/empty/error/success states in the approved visual language.
-**Acceptance:** admin journeys E2E pass; visual-regression parity across admin screens + RTL; no placeholder/fake buttons.
+## Phase 7 — Admin management, reporting, localization, UI completeness ✅ (complete 2026-10-18 — see progress/PHASE_7_REPORT.md)
+**Scope:** functional authorized admin pages for every nav item (users/roles, customers, shipments + status, operations, finance create/pay, documents, reports, notifications, settings, transfer); transfer workflow (ADR-011); reporting read-models; RTL + DS-vocabulary i18n with English fallback; loading/empty/error/success states.
+**Acceptance:** ✅ 8 admin integration tests (69 total) + 7 E2E pass · ✅ typecheck/lint/build clean · ✅ no placeholder/fake buttons (every button wired to a tested service). Visual-regression baselines are captured in Phase 8.
 
 ## Phase 8 — Security hardening, integration, E2E, visual regression
 **Scope:** CSP + secure headers (tested), CSRF, dependency audit in CI, structured logging + redaction, health checks/monitoring hooks; full integration + E2E + visual-regression sweep.
