@@ -45,3 +45,123 @@
     color: var(--orange-600);
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Responsive admin shell + portal (SSR-safe; CSS media queries)      */
+/* ------------------------------------------------------------------ */
+.admin-shell {
+  display: flex;
+  min-height: 100vh;
+  background: var(--surface-page);
+}
+.admin-sidebar {
+  width: 248px;
+  flex: none;
+  background: var(--navy-700);
+  display: flex;
+  flex-direction: column;
+  padding: 18px 12px;
+  gap: 2px;
+  overflow-y: auto;
+}
+.admin-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.admin-topbar {
+  height: 68px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 24px;
+  background: #fff;
+  border-bottom: 1px solid var(--border-default);
+}
+.admin-content {
+  flex: 1;
+  min-width: 0;
+  padding: 32px;
+}
+.admin-menu-btn {
+  display: none;
+}
+.admin-scrim {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .admin-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 60;
+    width: 272px;
+    transform: translateX(-100%);
+    transition: transform 0.2s var(--ease-out);
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.35);
+  }
+  .admin-sidebar[data-open="true"] {
+    transform: translateX(0);
+  }
+  .admin-menu-btn {
+    display: inline-flex;
+  }
+  .admin-scrim[data-open="true"] {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgba(1, 27, 64, 0.5);
+  }
+  .admin-topbar {
+    padding: 0 16px;
+  }
+  .admin-content {
+    padding: 16px;
+  }
+  /* Wide tables become horizontally scrollable instead of overflowing. */
+  .admin-content table {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+}
+
+/* RTL: drawer slides in from the right. */
+html[dir="rtl"] .admin-sidebar {
+  left: auto;
+  right: 0;
+}
+@media (max-width: 767px) {
+  html[dir="rtl"] .admin-sidebar {
+    transform: translateX(100%);
+  }
+  html[dir="rtl"] .admin-sidebar[data-open="true"] {
+    transform: translateX(0);
+  }
+}
+
+/* Portal header: wrap on small screens so items don't overlap. */
+.portal-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 32px;
+  min-height: 68px;
+  background: var(--navy-700);
+}
+@media (max-width: 767px) {
+  .portal-header {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 10px 16px;
+  }
+  .portal-main {
+    padding: 16px !important;
+  }
+}

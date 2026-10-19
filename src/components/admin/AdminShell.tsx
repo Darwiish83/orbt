@@ -3,16 +3,16 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Icon } from "@/ui/primitives";
 import { useT } from "@/i18n/I18nProvider";
 import { LangToggle } from "@/i18n/LangToggle";
 import type { AdminNavItem } from "./adminNav";
 
 /**
- * Navy admin shell: 248px sidebar + 68px topbar, matching the design system.
- * Presentational in Phase 1 (no auth/role gating yet). The active item shows
- * the orange inset bar; mobile collapses the sidebar behind a menu button.
+ * Navy admin shell: 248px sidebar + 68px topbar. On phones the sidebar becomes
+ * an off-canvas drawer opened by the topbar menu button (see globals.css
+ * .admin-* rules). Responsive behaviour is CSS-driven (SSR-safe).
  */
 export function AdminShell({
   children,
@@ -29,27 +29,22 @@ export function AdminShell({
   const pathname = usePathname();
   const [navOpen, setNavOpen] = useState(false);
 
+  // Close the drawer whenever the route changes.
+  useEffect(() => {
+    setNavOpen(false);
+  }, [pathname]);
+
   const activeKey =
     items.find((i) => pathname === i.href || pathname.startsWith(i.href + "/"))?.key ?? "dashboard";
-
   const title = items.find((i) => i.key === activeKey)?.label ?? "Dashboard";
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "var(--surface-page)" }}>
-      {/* Sidebar */}
-      <aside
-        data-open={navOpen}
-        style={{
-          width: 248,
-          flex: "none",
-          background: "var(--navy-700)",
-          display: "flex",
-          flexDirection: "column",
-          padding: "18px 12px",
-          gap: 2,
-          overflowY: "auto",
-        }}
-      >
+    <div className="admin-shell">
+      {/* Scrim (mobile, when the drawer is open) */}
+      <div className="admin-scrim" data-open={navOpen} onClick={() => setNavOpen(false)} aria-hidden="true" />
+
+      {/* Sidebar / drawer */}
+      <aside className="admin-sidebar" data-open={navOpen}>
         <div style={{ padding: "4px 12px 14px" }}>
           <Image
             src="/brand/orbit-logo-reversed.png"
@@ -89,6 +84,7 @@ export function AdminShell({
                 font: `${on ? 700 : 500} 14px var(--font-body)`,
                 boxShadow: on ? "inset 3px 0 0 var(--orange-500)" : "none",
                 textDecoration: "none",
+                flex: "none",
               }}
             >
               <Icon name={item.icon} size={18} color={on ? "var(--orange-400)" : "currentColor"} />
@@ -143,19 +139,27 @@ export function AdminShell({
       </aside>
 
       {/* Main column */}
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        <header
-          style={{
-            height: 68,
-            flex: "none",
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            padding: "0 24px",
-            background: "#fff",
-            borderBottom: "1px solid var(--border-default)",
-          }}
-        >
+      <div className="admin-main">
+        <header className="admin-topbar">
+          <button
+            type="button"
+            className="admin-menu-btn"
+            onClick={() => setNavOpen(true)}
+            aria-label={t("Menu")}
+            style={{
+              alignItems: "center",
+              justifyContent: "center",
+              width: 40,
+              height: 40,
+              border: "1px solid var(--border-default)",
+              borderRadius: "var(--radius-s)",
+              background: "#fff",
+              cursor: "pointer",
+              flex: "none",
+            }}
+          >
+            <Icon name="Menu" size={20} color="var(--navy-700)" />
+          </button>
           <div
             style={{
               flex: 1,
@@ -171,7 +175,7 @@ export function AdminShell({
           </div>
           <LangToggle />
         </header>
-        <main style={{ flex: 1, minWidth: 0, padding: 32 }}>
+        <main className="admin-content">
           <div style={{ maxWidth: "var(--container-max)", margin: "0 auto" }}>{children}</div>
         </main>
       </div>

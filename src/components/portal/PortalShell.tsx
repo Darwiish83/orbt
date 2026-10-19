@@ -28,16 +28,7 @@ export function PortalShell({
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <header
-        style={{
-          background: "var(--navy-700)",
-          display: "flex",
-          alignItems: "center",
-          gap: 24,
-          padding: "0 32px",
-          height: 68,
-        }}
-      >
+      <header className="portal-header">
         <Link href="/account" style={{ display: "inline-flex", alignItems: "center" }}>
           <Image src="/brand/orbit-logo-reversed.png" alt="OrbitCargo" width={130} height={34} priority style={{ height: 34, width: "auto" }} />
         </Link>
@@ -89,7 +80,7 @@ export function PortalShell({
           </button>
         </form>
       </header>
-      <main style={{ flex: 1, padding: "32px", background: "var(--surface-page)" }}>
+      <main className="portal-main" style={{ flex: 1, padding: "32px", background: "var(--surface-page)" }}>
         <div style={{ maxWidth: 960, margin: "0 auto" }}>{children}</div>
       </main>
     </div>
