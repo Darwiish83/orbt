@@ -16,7 +16,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   if (!user) redirect("/login");
   if (user.customerId) redirect("/account"); // customers use the portal, not admin
   // Privileged accounts must enroll in MFA before accessing the admin area.
-  if (isPrivileged(user.roleKeys, user.isSuperAdmin) && !user.mfaEnabled) redirect("/mfa/setup");
+  // Can be disabled for demo environments with REQUIRE_MFA=false (production
+  // leaves it unset → MFA enforced).
+  const mfaRequired = process.env.REQUIRE_MFA !== "false";
+  if (mfaRequired && isPrivileged(user.roleKeys, user.isSuperAdmin) && !user.mfaEnabled) {
+    redirect("/mfa/setup");
+  }
 
   // Show only the nav items this user can actually use (UX; pages still enforce).
   const items = ADMIN_NAV.filter((i) => !i.permission || can(user, i.permission));
