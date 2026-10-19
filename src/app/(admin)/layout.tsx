@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 import { AdminShell } from "@/components/admin/AdminShell";
+import { ADMIN_NAV } from "@/components/admin/adminNav";
+import { can } from "@/modules/authz/core";
 import { getSessionUser } from "@/modules/authz/session";
 import { isPrivileged } from "@/modules/auth/mfa";
 import { logout } from "@/app/login/actions";
@@ -16,8 +18,11 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   // Privileged accounts must enroll in MFA before accessing the admin area.
   if (isPrivileged(user.roleKeys, user.isSuperAdmin) && !user.mfaEnabled) redirect("/mfa/setup");
 
+  // Show only the nav items this user can actually use (UX; pages still enforce).
+  const items = ADMIN_NAV.filter((i) => !i.permission || can(user, i.permission));
+
   return (
-    <AdminShell userEmail={user.email} onLogout={logout}>
+    <AdminShell items={items} userEmail={user.email} onLogout={logout}>
       {children}
     </AdminShell>
   );

@@ -7,7 +7,7 @@ import { useState } from "react";
 import { Icon } from "@/ui/primitives";
 import { useT } from "@/i18n/I18nProvider";
 import { LangToggle } from "@/i18n/LangToggle";
-import { ADMIN_NAV } from "./adminNav";
+import type { AdminNavItem } from "./adminNav";
 
 /**
  * Navy admin shell: 248px sidebar + 68px topbar, matching the design system.
@@ -16,10 +16,12 @@ import { ADMIN_NAV } from "./adminNav";
  */
 export function AdminShell({
   children,
+  items,
   userEmail,
   onLogout,
 }: {
   children: React.ReactNode;
+  items: AdminNavItem[];
   userEmail?: string;
   onLogout?: () => void | Promise<void>;
 }) {
@@ -28,9 +30,9 @@ export function AdminShell({
   const [navOpen, setNavOpen] = useState(false);
 
   const activeKey =
-    ADMIN_NAV.find((i) => pathname === i.href || pathname.startsWith(i.href + "/"))?.key ?? "dashboard";
+    items.find((i) => pathname === i.href || pathname.startsWith(i.href + "/"))?.key ?? "dashboard";
 
-  const title = ADMIN_NAV.find((i) => i.key === activeKey)?.label ?? "Dashboard";
+  const title = items.find((i) => i.key === activeKey)?.label ?? "Dashboard";
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "var(--surface-page)" }}>
@@ -68,7 +70,7 @@ export function AdminShell({
         >
           {t("ADMIN PANEL")}
         </div>
-        {ADMIN_NAV.map((item) => {
+        {items.map((item) => {
           const on = item.key === activeKey;
           return (
             <Link
