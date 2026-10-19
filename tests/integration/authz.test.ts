@@ -205,3 +205,23 @@ describe("login rate limiting", () => {
     await expect(assertNotRateLimited(prisma, "fresh@orbit.so", "login")).resolves.toBeUndefined();
   });
 });
+
+// --- permission hierarchy ----------------------------------------------------
+
+describe("permission hierarchy (manage ⊇ write ⊇ read)", () => {
+  it("lets a holder of :manage perform :write and :read", async () => {
+    const role = await makeRole("docs_mgr", ["documents:manage"]);
+    const user = await authz((await makeUser({ email: "mgr@orbit.so", roleId: role.id })).id);
+    expect(() => requirePermission(user, "documents:manage")).not.toThrow();
+    expect(() => requirePermission(user, "documents:write")).not.toThrow();
+    expect(() => requirePermission(user, "documents:read")).not.toThrow();
+  });
+
+  it("lets a holder of :write perform :read but not :manage", async () => {
+    const role = await makeRole("ship_writer", ["shipments:write"]);
+    const user = await authz((await makeUser({ email: "writer@orbit.so", roleId: role.id })).id);
+    expect(() => requirePermission(user, "shipments:read")).not.toThrow();
+    expect(() => requirePermission(user, "shipments:write")).not.toThrow();
+    expect(() => requirePermission(user, "shipments:manage")).toThrow();
+  });
+});

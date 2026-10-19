@@ -61,7 +61,17 @@ export async function loadAuthzUser(db: PrismaClient, userId: string): Promise<A
 }
 
 export function can(user: AuthzUser, permission: Permission): boolean {
-  return user.isSuperAdmin || user.permissions.has(permission);
+  if (user.isSuperAdmin) return true;
+  if (user.permissions.has(permission)) return true;
+  // Permission hierarchy within a resource: manage ⊇ write ⊇ read.
+  const [resource, action] = permission.split(":");
+  if (action === "read") {
+    return user.permissions.has(`${resource}:write`) || user.permissions.has(`${resource}:manage`);
+  }
+  if (action === "write") {
+    return user.permissions.has(`${resource}:manage`);
+  }
+  return false;
 }
 
 export function requirePermission(user: AuthzUser, permission: Permission): void {
