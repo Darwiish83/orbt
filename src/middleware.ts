@@ -57,7 +57,8 @@ export default auth((req) => {
 
   const response =
     isProtected && !isLoggedIn
-      ? NextResponse.redirect(new URL("/login", nextUrl.origin))
+      ? // Customers sign in at /login; every other protected area is staff-only.
+        NextResponse.redirect(new URL(nextUrl.pathname.startsWith("/account") ? "/login" : "/admin/login", nextUrl.origin))
       : NextResponse.next({ request: { headers: requestHeaders } });
 
   response.headers.set("Content-Security-Policy", csp);
@@ -72,5 +73,5 @@ export default auth((req) => {
 });
 
 export const config = {
-  matcher: ["/((?!api/auth|_next/static|_next/image|favicon.ico|brand).*)"],
+  matcher: ["/((?!api/auth|_next/static|_next/image|favicon.ico|brand|flags|banks).*)"],
 };

@@ -62,13 +62,13 @@ enum ShipmentMode {
 
 // Operational status set (from the design system). Reconciliation with the
 // customer-facing vocabulary in readme.md is an OPEN decision (Phase 4).
+// Four operational statuses (ADR-017). IN_TRANSIT is shown as "Transit" and
+// only applies to Air; Sea goes DEPARTED → ARRIVED. ARRIVED is terminal.
 enum ShipmentStatus {
   AT_ORIGIN_STORE
   DEPARTED
   IN_TRANSIT
   ARRIVED
-  DELIVERED
-  ON_HOLD
 }
 
 enum ShipmentEventType {
@@ -102,9 +102,28 @@ enum ChargeParentType {
 
 enum ChargeCategory {
   FREIGHT
+  BRAND
+  FATURA
   LOCAL_DELIVERY
   CUSTOMS_TAX
   SERVICE
+  OTHER
+}
+
+enum ReceiptDirection {
+  IN
+  OUT
+}
+
+// What a receipt documents (spec: every money movement in or out gets one).
+enum ReceiptKind {
+  PAYMENT
+  EXPENSE
+  SHIPMENT_COST
+  COMMISSION
+  TRANSFER
+  DEBT
+  DEBT_RETURN
   OTHER
 }
 
@@ -308,8 +327,13 @@ model Customer {
   id              String         @id @default(cuid())
   ref             String         @unique // OR-####
   name            String
+  company         String? // required for new customers (validated in the service)
   phone           String?
-  email           String?
+  // Digits-only phone used to reject duplicates (+252 61-555 0100 == 25261555 0100).
+  phoneKey        String?        @unique
+  email           String?        @unique // stored lowercased
+  location        String? // free text (spec A1)
+  cargoCategory   String? // "What do you buy?"
   country         String?
   status          CustomerStatus @default(ACTIVE)
   createdByUserId String?
@@ -321,6 +345,7 @@ model Customer {
   payments      Payment[]
   documents     Document[]
   notifications Notification[]
+  receipts      Receipt[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -342,6 +367,10 @@ model Shipment {
   originCity      String?
   destCountry     String?
   destCity        String?
+  // Origin Code (city, e.g. IST / Istanbul) lives in originCity; destination code e.g. MGQ.
+  destCode        String?
+  shipDate        DateTime?      @db.Date
+  arrivalDate     DateTime?      @db.Date // expected arrival
   status          ShipmentStatus @default(AT_ORIGIN_STORE)
   businessYear    Int
   departedAt      DateTime?
@@ -372,6 +401,8 @@ model AirDetail {
   awbNumber          String?
   flightRef          String?
   chargeableWeightKg Decimal? @db.Decimal(12, 3)
+  // AWB KG entered manually; shipment detail shows Total KG − AWB KG.
+  awbKg              Decimal? @db.Decimal(12, 3)
 }
 
 model SeaDetail {
@@ -403,8 +434,22 @@ model ShipmentLine {
   packages           Int?
   chargeableWeightKg Decimal? @db.Decimal(12, 3)
   volumeCbm          Decimal? @db.Decimal(12, 3)
+  // MIX: a box shared with other customers. Measure (air) = KG + MIX KG.
+  mixCount           Int?
+  mixKg              Decimal? @db.Decimal(12, 3)
+  // Charges (ADR-013). Line total is computed server-side, never stored from the browser.
+  rate               Decimal? @db.Decimal(14, 2) // per kg (air) / per CBM (sea)
+  qualityRate        Decimal? @db.Decimal(14, 2) // per measure unit
+  brandPcs           Int?
+  brandRate          Decimal? @db.Decimal(14, 2)
+  fatura             Decimal? @db.Decimal(14, 2)
+  delivery           Decimal? @db.Decimal(14, 2)
+  other              Decimal? @db.Decimal(14, 2)
+  discount           Decimal? @db.Decimal(14, 2)
+  note               String?
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
   @@index([shipmentId])
   @@index([customerId])
@@ -452,20 +497,32 @@ model Quote {
 }
 
 model Invoice {
-  id              String        @id @default(cuid())
-  number          String        @unique
-  customerId      String
-  customer        Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  shipmentId      String?
-  shipment        Shipment?     @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
-  currency        String        @default("USD")
-  status          InvoiceStatus @default(UNPAID)
-  issuedAt        DateTime?
+  id               String        @id @default(cuid())
+  number           String        @unique
+  customerId       String
+  customer         Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  shipmentId       String?
+  shipment         Shipment?     @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
+  currency         String        @default("USD")
+  status           InvoiceStatus @default(UNPAID)
+  issuedAt         DateTime?
   // Authoritative total, recomputed server-side from line items (Phase 5).
-  total           Decimal       @default(0) @db.Decimal(14, 2)
-  amountAllocated Decimal       @default(0) @db.Decimal(14, 2)
-  businessYear    Int?
-  createdByUserId String?
+  total            Decimal       @default(0) @db.Decimal(14, 2)
+  amountAllocated  Decimal       @default(0) @db.Decimal(14, 2)
+  // Subtracted from the sum of lines (shown above Total). total = lines − discount.
+  discount         Decimal       @default(0) @db.Decimal(14, 2)
+  // Spec B9 freight inputs (snapshot at invoicing). The customer only ever sees
+  // the combined rate (rate + quality + agent commission).
+  actualMeasure    Decimal?      @db.Decimal(12, 3)
+  billedMeasure    Decimal?      @db.Decimal(12, 3)
+  baseRate         Decimal?      @db.Decimal(14, 2)
+  qualityRate      Decimal?      @db.Decimal(14, 2)
+  agentName        String?
+  agentRate        Decimal?      @db.Decimal(14, 2)
+  // billedMeasure × agentRate — not shipment income; counts once fully paid.
+  commissionAmount Decimal       @default(0) @db.Decimal(14, 2)
+  businessYear     Int?
+  createdByUserId  String?
 
   lines       ChargeLineItem[]
   allocations PaymentAllocation[]
@@ -505,6 +562,8 @@ model Payment {
   amount         Decimal       @db.Decimal(14, 2)
   currency       String        @default("USD")
   method         PaymentMethod
+  bankId         String?
+  bank           Bank?         @relation(fields: [bankId], references: [id], onDelete: Restrict)
   reference      String?
   idempotencyKey String?       @unique
   receivedAt     DateTime      @default(now())
@@ -515,6 +574,7 @@ model Payment {
   reversalReason String?
 
   allocations PaymentAllocation[]
+  receipt     Receipt?
 
   createdAt DateTime @default(now())
 
@@ -634,4 +694,99 @@ model AuditEvent {
 
   @@index([entityType, entityId])
   @@index([actorUserId, createdAt])
+}
+
+// ------------------------------------------------------- reference data (v2)
+
+// Banks shown with their logos on invoices, receipts and payment forms.
+model Bank {
+  id            String  @id @default(cuid())
+  name          String  @unique
+  accountNumber String?
+  logo          String? // public path, e.g. /banks/salaam.png
+  isCash        Boolean @default(false)
+  active        Boolean @default(true)
+  sortOrder     Int     @default(0)
+
+  payments Payment[]
+  receipts Receipt[]
+
+  createdAt DateTime @default(now())
+}
+
+// Countries managed in Settings. Origin countries get separate shipments,
+// finance and accounting; the flag comes from the ISO code.
+model Country {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  iso2     String  @unique // lowercase, e.g. "tr"
+  isOrigin Boolean @default(true)
+  active   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+}
+
+// Business years. Data is separated by year; a new year restarts W-1 / C-1.
+model BusinessYear {
+  year      Int      @id
+  isCurrent Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// Numbered receipt for every money movement (RCP-<year>-<n>, n from 1001).
+model Receipt {
+  id           String           @id @default(cuid())
+  number       String           @unique
+  year         Int
+  direction    ReceiptDirection
+  kind         ReceiptKind
+  amount       Decimal          @db.Decimal(14, 2)
+  currency     String           @default("USD")
+  bankId       String?
+  bank         Bank?            @relation(fields: [bankId], references: [id], onDelete: Restrict)
+  customerId   String?
+  customer     Customer?        @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  paymentId    String?          @unique
+  payment      Payment?         @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  counterparty String? // "Sent to" name + bank/phone for OUT receipts
+  note         String?
+  actorUserId  String?
+  issuedAt     DateTime         @default(now())
+
+  createdAt DateTime @default(now())
+
+  @@index([year, kind])
+  @@index([customerId])
+}
+
+// Per-year receipt counter, incremented atomically (row lock) inside the
+// transaction that issues the receipt.
+model ReceiptSequence {
+  year Int @id
+  next Int @default(1001)
+}
+
+// ---------------------------------------------------------- one-time codes
+
+enum OtpPurpose {
+  CUSTOMER_ACCESS // customer first login / forgotten password (Reference + Phone + Email)
+  CUSTOMER_SIGNUP // "Create New Account"; the customer is created once the code verifies
+  STAFF_SETUP // admin "Create Password": Employee ID + email → code
+}
+
+// Emailed 6-digit code. Only an HMAC of the code is stored; codes expire,
+// are single-use, and lock after too many wrong attempts.
+model OtpCode {
+  id         String     @id @default(cuid())
+  purpose    OtpPurpose
+  email      String // lowercased destination
+  userId     String? // set for CUSTOMER_ACCESS / STAFF_SETUP
+  payload    Json? // CUSTOMER_SIGNUP form data (no secrets)
+  codeHash   String
+  attempts   Int        @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime   @default(now())
+
+  @@index([email, purpose, createdAt])
 }

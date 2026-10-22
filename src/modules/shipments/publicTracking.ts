@@ -10,7 +10,7 @@ import { publicStatusLabel } from "./stateMachine";
 export interface PublicTracking {
   trackingNumber: string;
   status: string; // customer-facing label
-  mode: "AIR" | "SEA" | "ROAD";
+  mode: "AIR" | "SEA" | "ROAD"; // ROAD only for legacy rows
   origin: string;
   destination: string;
   milestones: { status: string; occurredAt: string }[];

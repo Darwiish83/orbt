@@ -1,8 +1,10 @@
 import { PrismaClient } from "@prisma/client";
+import { seedReferenceData } from "@/modules/reference/data";
 
 export const prisma = new PrismaClient();
 
-/** Truncate every table (except Prisma's migration ledger) between tests. */
+/** Truncate every table (except Prisma's migration ledger) between tests, then
+ * restore the reference rows (banks, countries, business year) the services require. */
 export async function resetDb(): Promise<void> {
   const tables = await prisma.$queryRaw<{ tablename: string }[]>`
     SELECT tablename FROM pg_tables
@@ -11,6 +13,7 @@ export async function resetDb(): Promise<void> {
   if (tables.length === 0) return;
   const list = tables.map((t) => `"${t.tablename}"`).join(", ");
   await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE`);
+  await seedReferenceData(prisma);
 }
 
 /** Guard: integration tests must never run against a non-test database. */

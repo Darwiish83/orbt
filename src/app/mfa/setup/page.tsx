@@ -10,7 +10,7 @@ export const metadata = { title: "Set up two-factor" };
 
 export default async function MfaSetupPage() {
   const user = await getSessionUser();
-  if (!user) redirect("/login");
+  if (!user) redirect("/admin/login");
   if (user.mfaEnabled) redirect("/dashboard");
 
   const { secret, otpauthUri } = await getOrStartSetup(prisma, user.id, user.email);
@@ -22,6 +22,8 @@ export default async function MfaSetupPage() {
         style={{
           width: "100%",
           maxWidth: 420,
+          // App layout, not a DS component: size includes padding (preflight is off).
+          boxSizing: "border-box",
           background: "var(--surface-card)",
           border: "1px solid var(--border-default)",
           borderRadius: "var(--radius-l)",

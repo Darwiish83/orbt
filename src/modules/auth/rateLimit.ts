@@ -9,7 +9,7 @@ import { RateLimitError } from "@/lib/errors";
  * dedicated rate-limit store (e.g. Redis) may be preferred under high load —
  * tracked for Phase 9.
  */
-export type AttemptKind = "login" | "reset";
+export type AttemptKind = "login" | "reset" | "otp";
 
 const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const MAX_FAILURES = 5;

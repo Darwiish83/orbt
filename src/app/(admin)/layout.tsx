@@ -13,7 +13,7 @@ import { logout } from "@/app/login/actions";
  */
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const user = await getSessionUser();
-  if (!user) redirect("/login");
+  if (!user) redirect("/admin/login");
   if (user.customerId) redirect("/account"); // customers use the portal, not admin
   // Privileged accounts must enroll in MFA before accessing the admin area.
   // Can be disabled for demo environments with REQUIRE_MFA=false (production

@@ -1,39 +1,52 @@
-import type { ShipmentStatus } from "@prisma/client";
+import type { ShipmentMode, ShipmentStatus } from "@prisma/client";
 
 /**
- * Shipment state machine (operational status set, from the design system).
+ * Shipment state machine — four statuses (ADR-017, owner spec §0):
  *
- * Status-vocabulary reconciliation (previously OPEN, resolved here):
- * the DATABASE uses the operational set below. The customer-facing vocabulary
- * from readme.md (Booked / Picked up / In transit / Delayed / Exception /
- * Out for delivery / Delivered) is a PRESENTATION mapping applied for public
- * tracking (see publicStatusLabel). Internal operations use the operational set.
+ *   Air:  AT_ORIGIN_STORE → DEPARTED → IN_TRANSIT ("Transit") → ARRIVED
+ *   Sea:  AT_ORIGIN_STORE → DEPARTED → ARRIVED
  *
- * Only transitions listed here are allowed; everything else is rejected
- * server-side. DELIVERED is terminal.
+ * AT_ORIGIN_STORE is the automatic starting status. ARRIVED (reached
+ * Mogadishu) is terminal. Status changes happen per shipment, so one change
+ * applies to every customer on it. Only the transitions listed here are
+ * allowed; everything else is rejected server-side.
  */
-export const TRANSITIONS: Record<ShipmentStatus, ShipmentStatus[]> = {
-  AT_ORIGIN_STORE: ["DEPARTED", "ON_HOLD"],
-  DEPARTED: ["IN_TRANSIT", "ON_HOLD"],
-  IN_TRANSIT: ["ARRIVED", "ON_HOLD"],
-  ARRIVED: ["DELIVERED", "ON_HOLD"],
-  ON_HOLD: ["AT_ORIGIN_STORE", "DEPARTED", "IN_TRANSIT", "ARRIVED"],
-  DELIVERED: [], // terminal
+const AIR: Record<ShipmentStatus, ShipmentStatus[]> = {
+  AT_ORIGIN_STORE: ["DEPARTED"],
+  DEPARTED: ["IN_TRANSIT"],
+  IN_TRANSIT: ["ARRIVED"],
+  ARRIVED: [],
 };
 
-export function canTransition(from: ShipmentStatus, to: ShipmentStatus): boolean {
-  return TRANSITIONS[from].includes(to);
+const SEA: Record<ShipmentStatus, ShipmentStatus[]> = {
+  AT_ORIGIN_STORE: ["DEPARTED"],
+  DEPARTED: ["ARRIVED"],
+  IN_TRANSIT: [], // not a Sea status
+  ARRIVED: [],
+};
+
+export function transitionsFor(mode: ShipmentMode): Record<ShipmentStatus, ShipmentStatus[]> {
+  return mode === "AIR" ? AIR : SEA;
 }
 
-/** Customer-facing label for a public/operational status. */
+export function canTransition(mode: ShipmentMode, from: ShipmentStatus, to: ShipmentStatus): boolean {
+  return transitionsFor(mode)[from].includes(to);
+}
+
+/** The ordered statuses a shipment of this mode goes through (for timelines). */
+export function statusSteps(mode: ShipmentMode): ShipmentStatus[] {
+  return mode === "AIR"
+    ? ["AT_ORIGIN_STORE", "DEPARTED", "IN_TRANSIT", "ARRIVED"]
+    : ["AT_ORIGIN_STORE", "DEPARTED", "ARRIVED"];
+}
+
+/** Display label (the same English keys the EN/SO/AR dictionaries translate). */
 export function publicStatusLabel(status: ShipmentStatus): string {
   const map: Record<ShipmentStatus, string> = {
-    AT_ORIGIN_STORE: "Booked",
+    AT_ORIGIN_STORE: "At Origin Store",
     DEPARTED: "Departed",
-    IN_TRANSIT: "In transit",
+    IN_TRANSIT: "Transit",
     ARRIVED: "Arrived",
-    ON_HOLD: "Delayed",
-    DELIVERED: "Delivered",
   };
   return map[status];
 }

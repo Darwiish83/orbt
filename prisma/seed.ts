@@ -1,12 +1,13 @@
 /**
- * Reference-data seed (idempotent). Seeds ONLY the roles and permission
- * catalogue — reference data the app needs, not fake customers/shipments/
+ * Reference-data seed (idempotent). Seeds ONLY reference data the app needs —
+ * roles, the permission catalogue, banks, countries and the business year — not fake customers/shipments/
  * payments. Safe to run repeatedly (upserts). The role→permission mapping is a
  * baseline from docs/security/PERMISSION_MATRIX.md and is finalized in Phase 3.
  *
  * Run: `npx prisma db seed`
  */
 import { PrismaClient } from "@prisma/client";
+import { seedReferenceData } from "../src/modules/reference/data";
 
 const prisma = new PrismaClient();
 
@@ -154,6 +155,9 @@ async function main() {
       });
     }
   }
+
+  // Banks, countries, business year (Phase 11).
+  await seedReferenceData(prisma);
 
   const [roleCount, permCount, linkCount] = await Promise.all([
     prisma.role.count(),

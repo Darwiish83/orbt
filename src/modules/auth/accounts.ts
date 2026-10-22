@@ -30,6 +30,49 @@ export async function verifyCredentials(
   return ok ? user : null;
 }
 
+const normId = (v: string) => v.trim().toUpperCase();
+
+async function checkPassword(user: User | null | undefined, password: string): Promise<User | null> {
+  if (!user || !user.passwordHash || user.status !== "ACTIVE") {
+    await verifyPassword(await getDummyHash(), password);
+    return null;
+  }
+  return (await verifyPassword(user.passwordHash, password)) ? user : null;
+}
+
+/**
+ * Customer sign-in (ADR-016): Customer Reference + password. The customer must
+ * be ACTIVE and have an activated portal account. Constant-ish timing: a hash
+ * verification always runs.
+ */
+export async function verifyCustomerLogin(db: PrismaClient, reference: string, password: string): Promise<User | null> {
+  const customer = await db.customer.findFirst({
+    where: { ref: { equals: normId(reference), mode: "insensitive" } },
+    select: { status: true, user: true },
+  });
+  return checkPassword(customer?.status === "ACTIVE" ? customer.user : null, password);
+}
+
+/**
+ * Staff sign-in (ADR-016): Employee ID + the account email ("Gmail") +
+ * password. The employee must be active and the email must be the one on the
+ * linked user. A customer account can never sign in here.
+ */
+export async function verifyStaffLogin(
+  db: PrismaClient,
+  employeeId: string,
+  email: string,
+  password: string,
+): Promise<User | null> {
+  const employee = await db.employee.findFirst({
+    where: { code: { equals: normId(employeeId), mode: "insensitive" } },
+    select: { active: true, user: true },
+  });
+  const user = employee?.active ? employee.user : null;
+  const emailOk = !!user && user.email === email.trim().toLowerCase() && !user.customerId;
+  return checkPassword(emailOk ? user : null, password);
+}
+
 /** Set (or reset) a password: hashes, activates the account, and bumps
  * sessionEpoch to invalidate any existing sessions. */
 export async function setPassword(db: PrismaClient, userId: string, plain: string): Promise<void> {

@@ -36,7 +36,7 @@ export default async function TrackPage({
         <Input
           name="n"
           defaultValue={number}
-          style={{ flex: 1 }}
+          style={{ flex: 1, minWidth: 0 }}
           label="Tracking number"
           placeholder="ORB-2026-7K3QZ9"
           leadingIcon={<Icon name="Search" size={16} />}

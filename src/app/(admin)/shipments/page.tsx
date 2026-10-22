@@ -13,9 +13,7 @@ const STATUS_TONE: Record<ShipmentStatus, BadgeTone> = {
   AT_ORIGIN_STORE: "neutral",
   DEPARTED: "warning",
   IN_TRANSIT: "info",
-  ARRIVED: "brand",
-  DELIVERED: "success",
-  ON_HOLD: "warning",
+  ARRIVED: "success",
 };
 
 function titleCase(s: string): string {

@@ -58,6 +58,7 @@ async function main() {
 
   console.log("Staff:    tester@orbit.so / Test12345  (broad access, no MFA)");
   console.log("Customer: cust@orbit.so   / Cust12345  (portal, customer OR-DEMO)");
+  console.log("Staff sign-in also needs an Employee ID: run `npx tsx scripts/backfill-employee-ids.ts`.");
 }
 
 main().then(() => prisma.$disconnect()).catch(async (e) => { console.error(e); await prisma.$disconnect(); process.exit(1); });

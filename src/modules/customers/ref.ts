@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 const START = 3000;
 
@@ -7,7 +7,7 @@ const START = 3000;
  * integer above the current max. The DB unique constraint on Customer.ref plus
  * a caller retry guards against concurrent allocation.
  */
-export async function nextCustomerRef(db: PrismaClient): Promise<string> {
+export async function nextCustomerRef(db: PrismaClient | Prisma.TransactionClient): Promise<string> {
   const customers = await db.customer.findMany({ select: { ref: true } });
   let max = START - 1;
   for (const c of customers) {

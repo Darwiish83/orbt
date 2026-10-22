@@ -3,7 +3,7 @@ import type { ShipmentStatus } from "@prisma/client";
 import { prisma } from "@/db/client";
 import { can } from "@/modules/authz/core";
 import { getShipmentForActor } from "@/modules/shipments/service";
-import { TRANSITIONS } from "@/modules/shipments/stateMachine";
+import { publicStatusLabel, transitionsFor } from "@/modules/shipments/stateMachine";
 import { requireUser } from "@/modules/authz/session";
 import { Badge } from "@/ui/primitives";
 import { changeStatusAction } from "../actions";
@@ -20,7 +20,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
   const shipment = await getShipmentForActor(prisma, user, id);
   if (!shipment) notFound();
 
-  const next = TRANSITIONS[shipment.status];
+  const next = transitionsFor(shipment.mode)[shipment.status];
   const mayChange = can(user, "shipments:status");
 
   return (
@@ -30,7 +30,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
           {shipment.code}
         </h1>
         <Badge tone="info" dot>
-          {titleCase(shipment.status)}
+          {publicStatusLabel(shipment.status)}
         </Badge>
       </div>
       <div style={{ color: "var(--text-muted)" }}>

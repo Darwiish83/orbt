@@ -4,16 +4,7 @@ import { buildPage, normalizePage, type Page, type PageParams } from "@/lib/pagi
 import { logAudit } from "@/modules/audit/log";
 import { invalidateSessions } from "@/modules/auth/accounts";
 import { requirePermission, type AuthzUser } from "@/modules/authz/core";
-
-async function nextEmployeeCode(db: PrismaClient): Promise<string> {
-  const emps = await db.employee.findMany({ select: { code: true } });
-  let max = 0;
-  for (const e of emps) {
-    const m = /^EMP-(\d+)$/.exec(e.code);
-    if (m) max = Math.max(max, parseInt(m[1]!, 10));
-  }
-  return `EMP-${String(max + 1).padStart(3, "0")}`;
-}
+import { nextEmployeeCode } from "./employeeCode";
 
 export interface CreateEmployeeUserInput {
   email: string;
@@ -32,7 +23,7 @@ export async function createEmployeeUser(
   requirePermission(actor, "users:manage");
 
   return db.$transaction(async (tx) => {
-    const code = await nextEmployeeCode(tx as unknown as PrismaClient);
+    const code = await nextEmployeeCode(tx);
     const employee = await tx.employee.create({
       data: { code, name: input.name, department: input.department, phone: input.phone, email: input.email.toLowerCase() },
     });

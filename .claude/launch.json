@@ -9,6 +9,21 @@
         "dev"
       ],
       "port": 3000
+    },
+    {
+      "name": "dev-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "-p",
+        "3500"
+      ],
+      "env": {
+        "NEXT_DIST_DIR": ".next-preview"
+      },
+      "port": 3500
     }
   ]
 }

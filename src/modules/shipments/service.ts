@@ -9,16 +9,25 @@ import {
   requireScope,
   type AuthzUser,
 } from "@/modules/authz/core";
+import { DESTINATION, requireBusinessYear, requireOriginCountry } from "@/modules/reference/data";
+import { lineMeasure } from "@/modules/finance/charges";
 import { generateTrackingNumber, nextShipmentCode } from "./identifiers";
 import { canTransition } from "./stateMachine";
 
 export interface CreateShipmentInput {
   mode: ShipmentMode;
   originCountry: string;
+  /** Origin Code (city), e.g. Istanbul / Mumbai. */
   originCity?: string;
+  /** Destination defaults to Mogadishu, Somalia (MGQ). */
   destCountry?: string;
   destCity?: string;
+  destCode?: string;
   businessYear: number;
+  shipDate?: Date;
+  arrivalDate?: Date;
+  /** Air waybill (plain text). */
+  awbNumber?: string;
 }
 
 export async function createShipment(
@@ -27,21 +36,29 @@ export async function createShipment(
   input: CreateShipmentInput,
 ): Promise<Shipment> {
   requirePermission(actor, "shipments:write");
-  requireScope(actor, { country: input.originCountry, businessYear: input.businessYear });
+  // Only Air (W-n) and Sea/Container (C-n) shipments are created (owner decision Q2).
+  if (input.mode === "ROAD") throw new ValidationError("Road shipments are not offered");
+  const originCountry = await requireOriginCountry(db, input.originCountry);
+  await requireBusinessYear(db, input.businessYear);
+  requireScope(actor, { country: originCountry, businessYear: input.businessYear });
 
   for (let attempt = 0; attempt < 5; attempt++) {
-    const code = await nextShipmentCode(db, input.mode, input.originCountry, input.businessYear);
+    const code = await nextShipmentCode(db, input.mode, originCountry, input.businessYear);
     try {
       const shipment = await db.shipment.create({
         data: {
           code,
           mode: input.mode,
-          originCountry: input.originCountry,
+          originCountry,
           originCity: input.originCity,
-          destCountry: input.destCountry,
-          destCity: input.destCity,
+          destCountry: input.destCountry ?? DESTINATION.country,
+          destCity: input.destCity ?? DESTINATION.city,
+          destCode: input.destCode ?? DESTINATION.code,
+          shipDate: input.shipDate,
+          arrivalDate: input.arrivalDate,
           businessYear: input.businessYear,
           createdByUserId: actor.id,
+          ...(input.mode === "AIR" && { airDetail: { create: { awbNumber: input.awbNumber } } }),
         },
       });
       await logAudit(db, {
@@ -139,7 +156,7 @@ export async function changeShipmentStatus(
     if (existing) return shipment;
   }
 
-  if (!canTransition(shipment.status, toStatus)) {
+  if (!canTransition(shipment.mode, shipment.status, toStatus)) {
     throw new ValidationError(`Illegal transition: ${shipment.status} → ${toStatus}`);
   }
 
@@ -195,18 +212,51 @@ export async function assignTrackingNumber(
   return trackingNumber;
 }
 
-export async function addShipmentLine(
-  db: PrismaClient,
-  actor: AuthzUser,
-  shipmentId: string,
-  input: { customerId: string; description?: string; packages?: number; chargeableWeightKg?: number; volumeCbm?: number },
-) {
+type Amount = number | string;
+
+export interface ShipmentLineInput {
+  customerId: string;
+  description?: string;
+  packages?: number;
+  chargeableWeightKg?: Amount;
+  volumeCbm?: Amount;
+  mixCount?: number;
+  mixKg?: Amount;
+  rate?: Amount;
+  qualityRate?: Amount;
+  brandPcs?: number;
+  brandRate?: Amount;
+  fatura?: Amount;
+  delivery?: Amount;
+  other?: Amount;
+  discount?: Amount;
+  note?: string;
+}
+
+/**
+ * Add a customer's cargo to a shipment. A customer may be added several times
+ * (entries stack and are summed). Measure (KG + MIX KG for Air, CBM for Sea)
+ * is computed server-side; validation rejects negative values. The shipment
+ * stays At Origin Store until Operations changes it.
+ */
+export async function addShipmentLine(db: PrismaClient, actor: AuthzUser, shipmentId: string, input: ShipmentLineInput) {
   requirePermission(actor, "shipments:write");
   const shipment = await db.shipment.findUnique({ where: { id: shipmentId } });
   if (!shipment) throw new ValidationError("Shipment not found");
   requireScope(actor, { country: shipment.originCountry, businessYear: shipment.businessYear });
+  if (shipment.mode === "AIR" && input.volumeCbm != null) throw new ValidationError("Air lines are measured in KG");
+  if (shipment.mode === "SEA" && (input.chargeableWeightKg != null || input.mixKg != null)) {
+    throw new ValidationError("Sea lines are measured in CBM");
+  }
+  for (const [k, v] of Object.entries({ packages: input.packages, mixCount: input.mixCount, brandPcs: input.brandPcs })) {
+    if (v != null && (!Number.isInteger(v) || v < 0)) throw new ValidationError(`${k} must be a whole number ≥ 0`);
+  }
+  lineMeasure(shipment.mode, input); // throws on negative measures
 
-  return db.shipmentLine.create({
+  const customer = await db.customer.findUnique({ where: { id: input.customerId }, select: { id: true } });
+  if (!customer) throw new ValidationError("Customer not found");
+
+  const line = await db.shipmentLine.create({
     data: {
       shipmentId,
       customerId: input.customerId,
@@ -214,6 +264,25 @@ export async function addShipmentLine(
       packages: input.packages,
       chargeableWeightKg: input.chargeableWeightKg,
       volumeCbm: input.volumeCbm,
+      mixCount: input.mixCount,
+      mixKg: input.mixKg,
+      rate: input.rate,
+      qualityRate: input.qualityRate,
+      brandPcs: input.brandPcs,
+      brandRate: input.brandRate,
+      fatura: input.fatura,
+      delivery: input.delivery,
+      other: input.other,
+      discount: input.discount,
+      note: input.note,
     },
   });
+  await logAudit(db, {
+    actorUserId: actor.id,
+    action: "shipment.line_add",
+    entityType: "Shipment",
+    entityId: shipmentId,
+    metadata: { lineId: line.id, customerId: input.customerId },
+  });
+  return line;
 }

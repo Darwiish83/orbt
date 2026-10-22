@@ -3,6 +3,7 @@ import { ValidationError } from "@/lib/errors";
 import { logAudit } from "@/modules/audit/log";
 import { requirePermission, type AuthzUser } from "@/modules/authz/core";
 import { recomputeInvoice } from "./invoices";
+import { issueReceipt } from "./receipts";
 import { dec, gt, round2, sum } from "./money";
 
 export interface AllocationInput {
@@ -15,8 +16,11 @@ export interface RecordPaymentInput {
   amount: number | string;
   currency?: string;
   method: PaymentMethod;
+  /** Bank the money arrived in (Salaam / Dahabshiil / Premier / Cash). */
+  bankId?: string;
   reference?: string;
   idempotencyKey?: string;
+  receivedAt?: Date;
   allocations?: AllocationInput[];
 }
 
@@ -25,7 +29,8 @@ export interface RecordPaymentInput {
  * - amounts are decimal, currency explicit and must match each invoice;
  * - allocations cannot exceed the payment amount, nor an invoice's balance;
  * - the payment + allocations + invoice recompute happen in one transaction;
- * - idempotent on idempotencyKey (a replay returns the original payment).
+ * - idempotent on idempotencyKey (a replay returns the original payment);
+ * - a numbered receipt (RCP-<year>-<n>) is issued in the same transaction.
  */
 export async function recordPayment(
   db: PrismaClient,
@@ -51,6 +56,11 @@ export async function recordPayment(
   }
 
   return db.$transaction(async (tx) => {
+    if (input.bankId) {
+      const bank = await tx.bank.findUnique({ where: { id: input.bankId } });
+      if (!bank || !bank.active) throw new ValidationError("Unknown or inactive bank");
+    }
+
     // Validate each target invoice: ownership, currency, not void, sufficient balance.
     for (const a of allocations) {
       const invoice = await tx.invoice.findUnique({ where: { id: a.invoiceId } });
@@ -74,10 +84,24 @@ export async function recordPayment(
         amount,
         currency,
         method: input.method,
+        bankId: input.bankId,
         reference: input.reference,
         idempotencyKey: input.idempotencyKey,
+        receivedAt: input.receivedAt,
         actorUserId: actor.id,
       },
+    });
+
+    const receipt = await issueReceipt(tx, {
+      direction: "IN",
+      kind: "PAYMENT",
+      amount,
+      currency,
+      bankId: input.bankId,
+      customerId: input.customerId,
+      paymentId: payment.id,
+      actorUserId: actor.id,
+      issuedAt: payment.receivedAt,
     });
 
     for (const a of allocations) {
@@ -97,6 +121,7 @@ export async function recordPayment(
         currency,
         allocated: allocTotal.toString(),
         invoices: allocations.map((a) => a.invoiceId),
+        receipt: receipt.number,
       },
     });
 

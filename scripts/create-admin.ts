@@ -8,6 +8,7 @@
  */
 import { hash } from "@node-rs/argon2";
 import { PrismaClient } from "@prisma/client";
+import { ensureEmployeeForUser } from "../src/modules/users/employeeCode";
 
 const prisma = new PrismaClient();
 
@@ -44,7 +45,9 @@ async function main() {
     await prisma.userRole.create({ data: { userId: user.id, roleId: role.id } });
   }
 
-  console.log(`Super Admin ready: ${user.email}`);
+  // Staff sign in with email + password + Employee ID.
+  const code = await ensureEmployeeForUser(prisma, user.id);
+  console.log(`Super Admin ready: ${user.email} — Employee ID ${code}`);
 }
 
 main()

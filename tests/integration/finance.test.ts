@@ -32,7 +32,7 @@ async function staff(perms: string[]): Promise<AuthzUser> {
 }
 
 async function customerId(admin: AuthzUser): Promise<string> {
-  return (await createCustomer(prisma, admin, { name: `C-${uniq()}` })).id;
+  return (await createCustomer(prisma, admin, { name: `C-${uniq()}`, company: "Test Co" })).id;
 }
 
 describe("charge lines & invoice totals (server-computed)", () => {

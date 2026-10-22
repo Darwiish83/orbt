@@ -119,6 +119,12 @@ const config: Config = {
       },
     },
   },
+  // Preflight is OFF: it forces `box-sizing: border-box` and resets margins on
+  // every element, but the design system is authored against browser defaults
+  // (content-box) plus its own base.css (folded into globals.css). With
+  // preflight on, every bordered control renders smaller than the design
+  // (caught by tests/e2e/design-parity.spec.ts).
+  corePlugins: { preflight: false },
   plugins: [],
 };
 

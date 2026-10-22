@@ -35,17 +35,30 @@ export async function createResetToken(db: PrismaClient, email: string): Promise
 }
 
 /**
- * Consume a reset token and set the new password. Validates existence,
+ * Short-lived set-password token for a user who has just proven control of
+ * their email with a one-time code (first login, forgotten password, signup,
+ * staff setup). Same storage and single-use rules as reset tokens.
+ */
+export async function createSetPasswordToken(db: PrismaClient, userId: string, ttlMs = 15 * 60 * 1000): Promise<string> {
+  const raw = randomBytes(32).toString("base64url");
+  await db.passwordResetToken.create({
+    data: { userId, tokenHash: hashToken(raw), expiresAt: new Date(Date.now() + ttlMs) },
+  });
+  return raw;
+}
+
+/**
+ * Consume a reset token and set the new password. Returns the user id. Validates existence,
  * expiry and single-use in one transaction. Throws on any invalid token.
  */
 export async function consumeResetToken(
   db: PrismaClient,
   rawToken: string,
   newPassword: string,
-): Promise<void> {
+): Promise<string> {
   const tokenHash = hashToken(rawToken);
 
-  await db.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const token = await tx.passwordResetToken.findUnique({ where: { tokenHash } });
     if (!token || token.usedAt || token.expiresAt.getTime() < Date.now()) {
       throw new Error("Invalid or expired reset token");
@@ -56,5 +69,6 @@ export async function consumeResetToken(
       data: { usedAt: new Date() },
     });
     await setPassword(tx as unknown as PrismaClient, token.userId, newPassword);
+    return token.userId;
   });
 }

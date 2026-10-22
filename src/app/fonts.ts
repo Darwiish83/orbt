@@ -11,6 +11,9 @@ export const archivo = Archivo({
   axes: ["wdth"],
   variable: "--font-archivo",
   display: "swap",
+  // No metric-adjusted Arial fallback: glyphs Archivo's latin subset lacks
+  // (e.g. "→") must fall back to system-ui exactly as the design's stack does.
+  adjustFontFallback: false,
 });
 
 export const jetbrainsMono = JetBrains_Mono({
@@ -18,4 +21,5 @@ export const jetbrainsMono = JetBrains_Mono({
   weight: ["400", "500", "600"],
   variable: "--font-jetbrains",
   display: "swap",
+  adjustFontFallback: false,
 });

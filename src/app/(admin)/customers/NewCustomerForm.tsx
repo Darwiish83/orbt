@@ -24,9 +24,12 @@ export function NewCustomerForm() {
         alignItems: "flex-end",
       }}
     >
-      <Input name="name" label="New customer" placeholder="Company or person" required style={{ flex: "2 1 200px" }} />
-      <Input name="country" label="Country" placeholder="Turkey" style={{ flex: "1 1 120px" }} />
+      <Input name="name" label="New customer" placeholder="Full name" required style={{ flex: "2 1 200px" }} />
+      <Input name="company" label="Company" placeholder="Company" required style={{ flex: "2 1 180px" }} />
       <Input name="phone" label="Phone" placeholder="+252…" style={{ flex: "1 1 140px" }} />
+      <Input name="email" type="email" label="Email" style={{ flex: "1 1 180px" }} />
+      <Input name="location" label="Location" placeholder="e.g. Mogadishu, Bakara" style={{ flex: "1 1 160px" }} />
+      <Input name="cargoCategory" label="What do you buy?" placeholder="e.g. Electronics, clothes" style={{ flex: "1 1 180px" }} />
       <Button type="submit" disabled={pending} leadingIcon={<Icon name="Plus" size={16} />}>
         {pending ? "Adding…" : "Add customer"}
       </Button>

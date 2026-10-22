@@ -66,8 +66,8 @@ describe("identifier generation", () => {
     expect(air2.code).toBe("W-2");
     expect(sea1.code).toBe("C-1");
 
-    const c1 = await createCustomer(prisma, admin, { name: "A" });
-    const c2 = await createCustomer(prisma, admin, { name: "B" });
+    const c1 = await createCustomer(prisma, admin, { name: "A", company: "Test Co" });
+    const c2 = await createCustomer(prisma, admin, { name: "B", company: "Test Co" });
     expect(c1.ref).toBe("OR-3000");
     expect(c2.ref).toBe("OR-3001");
   });
@@ -111,8 +111,9 @@ describe("state machine", () => {
     expect(departed.status).toBe("DEPARTED");
     expect(departed.departedAt).toBeInstanceOf(Date);
 
-    // AT_ORIGIN_STORE → DELIVERED is illegal (and we're now DEPARTED anyway).
-    await expect(changeShipmentStatus(prisma, admin, s.id, "DELIVERED")).rejects.toThrow(/illegal transition/i);
+    // Skipping a step (DEPARTED → ARRIVED for Air) and going back are illegal.
+    await expect(changeShipmentStatus(prisma, admin, s.id, "ARRIVED")).rejects.toThrow(/illegal transition/i);
+    await expect(changeShipmentStatus(prisma, admin, s.id, "AT_ORIGIN_STORE")).rejects.toThrow(/illegal transition/i);
 
     const events = await prisma.shipmentEvent.count({ where: { shipmentId: s.id } });
     expect(events).toBe(1); // only the successful transition recorded
@@ -171,8 +172,8 @@ describe("public tracking (approved subset only)", () => {
 describe("customer-scoped shipment access (IDOR)", () => {
   it("lets a customer read only shipments carrying their own line", async () => {
     const admin = await superAdmin();
-    const a = await createCustomer(prisma, admin, { name: "Cust A" });
-    const b = await createCustomer(prisma, admin, { name: "Cust B" });
+    const a = await createCustomer(prisma, admin, { name: "Cust A", company: "Test Co" });
+    const b = await createCustomer(prisma, admin, { name: "Cust B", company: "Test Co" });
     const shipment = await createShipment(prisma, admin, { mode: "AIR", originCountry: "Turkey", businessYear: 2026 });
     await addShipmentLine(prisma, admin, shipment.id, { customerId: a.id });
 
@@ -199,16 +200,16 @@ describe("pagination & filtering", () => {
     expect(page1.total).toBe(3);
     expect(page1.totalPages).toBe(2);
 
-    const onHold = await listShipments(prisma, admin, { status: "DELIVERED" });
-    expect(onHold.total).toBe(0);
+    const arrived = await listShipments(prisma, admin, { status: "ARRIVED" });
+    expect(arrived.total).toBe(0);
   });
 });
 
 describe("customer access", () => {
   it("enforces ownership on getCustomer and scopes listCustomers", async () => {
     const admin = await superAdmin();
-    const a = await createCustomer(prisma, admin, { name: "A" });
-    const b = await createCustomer(prisma, admin, { name: "B" });
+    const a = await createCustomer(prisma, admin, { name: "A", company: "Test Co" });
+    const b = await createCustomer(prisma, admin, { name: "B", company: "Test Co" });
     const custA = await customerPrincipal(a.id);
 
     await expect(getCustomer(prisma, custA, a.id)).resolves.toBeTruthy();

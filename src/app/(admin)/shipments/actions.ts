@@ -11,7 +11,7 @@ import { changeShipmentStatus, createShipment } from "@/modules/shipments/servic
 export type ActionState = { error: string | null; ok?: boolean };
 
 const createSchema = z.object({
-  mode: z.enum(["AIR", "SEA", "ROAD"]),
+  mode: z.enum(["AIR", "SEA"]),
   originCountry: z.string().min(1),
   originCity: z.string().optional(),
   destCountry: z.string().optional(),

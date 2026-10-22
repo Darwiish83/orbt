@@ -29,7 +29,6 @@ export function NewShipmentForm() {
         <select name="mode" defaultValue="AIR" style={{ height: 40, padding: "0 10px", border: "1px solid var(--border-strong)", borderRadius: "var(--radius-s)", background: "#fff" }}>
           <option value="AIR">Air</option>
           <option value="SEA">Sea</option>
-          <option value="ROAD">Road</option>
         </select>
       </label>
       <Input name="originCountry" label="Origin country" placeholder="Turkey" required style={{ flex: "1 1 140px" }} />

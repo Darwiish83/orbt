@@ -10,6 +10,8 @@ const initial: ForgotState = { done: false };
 const cardStyle = {
   width: "100%",
   maxWidth: 400,
+  // App layout, not a DS component: size includes padding (preflight is off).
+  boxSizing: "border-box",
   background: "var(--surface-card)",
   border: "1px solid var(--border-default)",
   borderRadius: "var(--radius-l)",

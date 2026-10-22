@@ -56,6 +56,7 @@ async function main() {
   // 1) Customer Support onboards the customer.
   const customer = await createCustomer(prisma, support, {
     name: "Hal-Abuur Trading",
+    company: "Hal-Abuur Trading",
     country: "Somalia",
     phone: "+252 61 555 0100",
   });
@@ -67,7 +68,7 @@ async function main() {
   // 2) Operation Admin opens the consolidation shipment + the customer's cargo line + tracking.
   const shipment = await createShipment(prisma, opsAdmin, {
     mode: "SEA",
-    originCountry: "China",
+    originCountry: "Turkey",
     originCity: "Guangzhou",
     destCountry: "Somalia",
     destCity: "Mogadishu",
@@ -112,8 +113,7 @@ async function main() {
   log("Finance Admin", "finadmin@demo.so", "recorded $1,150.00 payment → invoice PAID");
 
   // 6) Operation Staff delivers.
-  await changeShipmentStatus(prisma, opsStaff, shipment.id, "DELIVERED");
-  log("Operation Staff", "opsstaff@demo.so", "marked shipment DELIVERED");
+  // ARRIVED (Mogadishu) is the final status (ADR-017).
 
   // 7) Document Officer files the bill of lading against the customer.
   const pdf = Buffer.from("%PDF-1.4\nOrbitCargo Bill of Lading\n", "latin1");

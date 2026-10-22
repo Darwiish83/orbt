@@ -2,20 +2,19 @@ import type { ShipmentStatus } from "@prisma/client";
 import { prisma } from "@/db/client";
 import { can } from "@/modules/authz/core";
 import { listShipments } from "@/modules/shipments/service";
-import { TRANSITIONS } from "@/modules/shipments/stateMachine";
+import { publicStatusLabel, transitionsFor } from "@/modules/shipments/stateMachine";
 import { requireUser } from "@/modules/authz/session";
 import { Badge } from "@/ui/primitives";
 import { changeStatusAction } from "../shipments/actions";
 
 export const metadata = { title: "Operations" };
 
-const titleCase = (s: string) => s.toLowerCase().replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 
 export default async function OperationsPage() {
   const user = await requireUser();
   const { items } = await listShipments(prisma, user, { pageSize: 50 });
   const mayChange = can(user, "shipments:status");
-  const active = items.filter((s) => s.status !== "DELIVERED");
+  const active = items.filter((s) => s.status !== "ARRIVED");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -45,11 +44,11 @@ export default async function OperationsPage() {
               {s.mode} · {s.originCountry} → {s.destCountry ?? "—"}
             </span>
             <Badge tone="info" dot>
-              {titleCase(s.status)}
+              {publicStatusLabel(s.status)}
             </Badge>
             {mayChange && (
               <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {TRANSITIONS[s.status].map((to: ShipmentStatus) => (
+                {transitionsFor(s.mode)[s.status].map((to: ShipmentStatus) => (
                   <form key={to} action={changeStatusAction}>
                     <input type="hidden" name="id" value={s.id} />
                     <input type="hidden" name="to" value={to} />
@@ -57,7 +56,7 @@ export default async function OperationsPage() {
                       type="submit"
                       style={{ height: 32, padding: "0 12px", border: "1.5px solid var(--navy-700)", background: "transparent", color: "var(--navy-700)", borderRadius: "var(--radius-s)", font: "700 12px var(--font-body)", cursor: "pointer" }}
                     >
-                      → {titleCase(to)}
+                      → {publicStatusLabel(to)}
                     </button>
                   </form>
                 ))}

@@ -5,6 +5,10 @@
 
 # next.js
 /.next/
+/.next-design/
+/.next-e2e/
+/.next-build/
+/.next-preview/
 /out/
 next-env.d.ts
 
@@ -19,6 +23,8 @@ next-env.d.ts
 /test-results
 /playwright-report
 /playwright/.cache
+# design-parity baselines are regenerated from the design on every run
+/tests/e2e/design-parity.spec.ts-snapshots/
 
 # env — never commit real secrets
 .env
@@ -39,3 +45,6 @@ Thumbs.db
 
 # NOTE: design-reference/ is a read-only copy of the design system archive,
 # kept in-tree intentionally as the visual-parity source. Keep it tracked.
+
+# local database dumps (contain data — never commit)
+/backups/
