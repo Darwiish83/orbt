@@ -55,6 +55,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           if (!code || !(await verifyMfa(prisma, user.id, code))) return null;
         }
 
+        // Users & Team → "Last Login".
+        await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
         return { id: user.id, email: user.email, sessionEpoch: user.sessionEpoch };
       },
     }),

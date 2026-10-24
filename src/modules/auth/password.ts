@@ -26,3 +26,9 @@ export async function verifyPassword(encodedHash: string, plain: string): Promis
     return false;
   }
 }
+
+/** Argon2id for a short numeric secret (the Accounting PIN). Its length rules
+ * are checked by the caller; brute force is stopped by rate limiting. */
+export async function hashPin(pin: string): Promise<string> {
+  return hash(pin, OPTIONS);
+}

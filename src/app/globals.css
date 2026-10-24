@@ -120,6 +120,25 @@
   .admin-topbar {
     padding: 0 16px;
   }
+  /* Year + Country drop to their own full-width row on phones. */
+  .admin-topbar:has(.admin-scope) {
+    height: auto;
+    min-height: 68px;
+    flex-wrap: wrap;
+    padding: 12px 16px;
+  }
+  .admin-scope {
+    order: 10;
+    width: 100%;
+  }
+  .admin-scope > label {
+    flex: 1;
+    min-width: 0;
+  }
+  .admin-scope select {
+    flex: 1;
+    min-width: 0;
+  }
   .admin-content {
     padding: 16px;
   }
@@ -262,5 +281,27 @@ html[dir="rtl"] .admin-sidebar {
     max-width: none;
     padding: 48px;
     margin: 0;
+  }
+}
+
+/* Printable documents (/print/*): "Download PDF" uses the browser's Save as PDF. */
+.print-page {
+  min-height: 100vh;
+  padding: 24px 16px;
+  background: var(--surface-sunken);
+  box-sizing: border-box;
+}
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-page {
+    min-height: 0;
+    padding: 0;
+    background: #fff;
   }
 }

@@ -21,6 +21,8 @@ const PROTECTED_PREFIXES = [
   "/settings",
   "/account",
   "/mfa",
+  "/print",
+  "/accounting",
 ];
 
 export const authConfig = {

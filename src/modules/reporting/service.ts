@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient, ShipmentStatus } from "@prisma/client";
+import { AuthorizationError } from "@/lib/errors";
 import { allowedCountries, requirePermission, type AuthzUser } from "@/modules/authz/core";
 import { dec, round2 } from "@/modules/finance/money";
 
@@ -31,8 +32,11 @@ export async function getReport(
     db.shipment.findMany({ where: shipWhere, select: { createdAt: true, mode: true } }),
   ]);
 
-  const invWhere: Prisma.InvoiceWhereInput = {};
+  // Same country scope as the shipments: a country-scoped user must not see
+  // other countries' money. Voided invoices are not revenue.
+  const invWhere: Prisma.InvoiceWhereInput = { status: { not: "VOID" } };
   if (opts.businessYear) invWhere.businessYear = opts.businessYear;
+  if (countries !== null) invWhere.shipment = { originCountry: { in: countries } };
   const finance = await db.invoice.aggregate({
     where: invWhere,
     _sum: { total: true, amountAllocated: true },
@@ -68,6 +72,76 @@ export async function getReport(
       invoiceCount: finance._count._all,
     },
     customers,
+    monthly,
+  };
+}
+
+export type ReportSection = "company" | "shipments" | "finance" | "customers" | "operations";
+
+/**
+ * Reports (spec B13 / §14): one report per section plus a company-wide one.
+ * Company-wide covers every country the user may see; the others use the
+ * top bar's country. Always one business year.
+ */
+export async function getAdminReport(
+  db: PrismaClient,
+  actor: AuthzUser,
+  opts: { year: number; country: string; section: ReportSection },
+) {
+  requirePermission(actor, "reports:read");
+  const allowed = allowedCountries(actor);
+  const countries = opts.section === "company" ? allowed : [opts.country];
+  if (allowed !== null && countries && countries.some((c) => !allowed.includes(c))) {
+    throw new AuthorizationError("Outside your assigned country/year scope");
+  }
+  const shipWhere: Prisma.ShipmentWhereInput = { businessYear: opts.year, ...(countries ? { originCountry: { in: countries } } : {}) };
+  const [shipments, invoices, customers, activeCustomers] = await Promise.all([
+    db.shipment.findMany({ where: shipWhere, include: { lines: true } }),
+    db.invoice.findMany({ where: { status: { not: "VOID" }, shipment: shipWhere }, select: { total: true, amountAllocated: true, createdAt: true, issuedAt: true } }),
+    db.customer.count(),
+    db.customer.count({ where: { status: "ACTIVE" } }),
+  ]);
+  const measure = (mode: "AIR" | "SEA") =>
+    round2(
+      shipments
+        .filter((s) => s.mode === mode)
+        .flatMap((s) => s.lines)
+        .reduce((a, l) => a.add(mode === "AIR" ? dec(l.chargeableWeightKg ?? 0).add(dec(l.mixKg ?? 0)) : dec(l.volumeCbm ?? 0)), dec(0)),
+    ).toString();
+  const revenue = round2(invoices.reduce((a, i) => a.add(i.total), dec(0)));
+  const collected = round2(invoices.reduce((a, i) => a.add(i.amountAllocated), dec(0)));
+  const monthly = MONTHS.map((m) => ({ month: m, air: 0, sea: 0, revenue: "0" }));
+  for (const s of shipments) {
+    const d = s.shipDate ?? s.createdAt;
+    if (d.getUTCFullYear() !== opts.year) continue;
+    if (s.mode === "AIR") monthly[d.getUTCMonth()]!.air++;
+    else if (s.mode === "SEA") monthly[d.getUTCMonth()]!.sea++;
+  }
+  for (let m = 0; m < 12; m++) {
+    monthly[m]!.revenue = round2(
+      invoices.filter((i) => (i.issuedAt ?? i.createdAt).getUTCMonth() === m && (i.issuedAt ?? i.createdAt).getUTCFullYear() === opts.year).reduce((a, i) => a.add(i.total), dec(0)),
+    ).toString();
+  }
+  const statuses: ShipmentStatus[] = ["AT_ORIGIN_STORE", "DEPARTED", "IN_TRANSIT", "ARRIVED"];
+  return {
+    section: opts.section,
+    year: opts.year,
+    countries: countries ?? "all",
+    totals: {
+      shipments: shipments.length,
+      air: shipments.filter((s) => s.mode === "AIR").length,
+      sea: shipments.filter((s) => s.mode === "SEA").length,
+      kg: measure("AIR"),
+      cbm: measure("SEA"),
+      packages: shipments.flatMap((s) => s.lines).reduce((n, l) => n + (l.packages ?? 0) + (l.mixCount ?? 0), 0),
+      revenue: revenue.toString(),
+      collected: collected.toString(),
+      outstanding: round2(revenue.minus(collected)).toString(),
+      invoices: invoices.length,
+      customers,
+      activeCustomers,
+    },
+    status: statuses.map((st) => ({ status: st, count: shipments.filter((s) => s.status === st).length })),
     monthly,
   };
 }

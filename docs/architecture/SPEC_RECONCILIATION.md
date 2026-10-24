@@ -40,6 +40,10 @@ Each phase stops for owner approval. Every new query keeps server-side authoriza
 
 ## 3. Revised phases
 
+**Order change (2026-10-24, owner):** Phase 15 (Finance) runs before Phase 14 (Admin core). Phase 13 (Customer App) is still waiting for approval.
+
+**Status (2026-10-24):** Phases 15, 14, 16 and 17 are done (reports in `docs/progress/PHASE_1{4,5,6,7}_REPORT.md`); the owner asked for them back-to-back. Phase 13 (Customer App) is the remaining phase.
+
 | Phase | Scope | Acceptance criteria |
 |---|---|---|
 | **11 — Data model v2** | Everything marked "Phase 11" in §2. Additive migrations plus the status migration. Customer duplicate email/phone guard. Level calculation (ADR-014). Line and invoice totals per ADR-013 (Decimal). Receipt numbering. Bank, Country and BusinessYear entities. | Migrations apply on a copy of the dev DB, and the 3 `DELIVERED` shipments become `ARRIVED`. Integration tests: level tiers, MIX measure, line/invoice totals and rounding, duplicate rejection, receipt numbering under concurrency. Existing suites stay green. |

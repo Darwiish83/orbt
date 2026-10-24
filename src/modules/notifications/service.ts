@@ -2,6 +2,7 @@ import type { Notification, NotificationAudience, Prisma, PrismaClient } from "@
 import { buildPage, normalizePage, type Page, type PageParams } from "@/lib/pagination";
 import { logAudit } from "@/modules/audit/log";
 import { isCustomerPrincipal, requirePermission, type AuthzUser } from "@/modules/authz/core";
+import { publishDueAnnouncements } from "./announcements";
 
 export interface CreateNotificationInput {
   audience: NotificationAudience;
@@ -55,6 +56,7 @@ export async function listNotificationsForUser(
   filters: PageParams = {},
 ): Promise<Page<Notification>> {
   const { page, pageSize, skip, take } = normalizePage(filters);
+  await publishDueAnnouncements(db);
   let where: Prisma.NotificationWhereInput;
 
   if (isCustomerPrincipal(actor)) {

@@ -12,7 +12,7 @@ import {
 import { DESTINATION, requireBusinessYear, requireOriginCountry } from "@/modules/reference/data";
 import { lineMeasure } from "@/modules/finance/charges";
 import { generateTrackingNumber, nextShipmentCode } from "./identifiers";
-import { canTransition } from "./stateMachine";
+import { canTransition, publicStatusLabel } from "./stateMachine";
 
 export interface CreateShipmentInput {
   mode: ShipmentMode;
@@ -121,7 +121,11 @@ export async function listShipments(
 
   if (filters.status) where.status = filters.status;
   if (filters.mode) where.mode = filters.mode;
-  if (filters.country) where.originCountry = filters.country;
+  if (filters.country) {
+    // A requested country narrows the staff scope; it must never widen it.
+    if (!isCustomerPrincipal(actor)) requireScope(actor, { country: filters.country });
+    where.originCountry = filters.country;
+  }
   if (filters.businessYear) where.businessYear = filters.businessYear;
 
   const [items, total] = await Promise.all([
@@ -142,7 +146,7 @@ export async function changeShipmentStatus(
   actor: AuthzUser,
   shipmentId: string,
   toStatus: ShipmentStatus,
-  opts: { note?: string; idempotencyKey?: string } = {},
+  opts: { note?: string; idempotencyKey?: string; notifyCustomers?: boolean } = {},
 ): Promise<Shipment> {
   requirePermission(actor, "shipments:status");
 
@@ -179,12 +183,31 @@ export async function changeShipmentStatus(
         idempotencyKey: opts.idempotencyKey,
       },
     });
+    // Spec §8: one change updates every customer in the shipment and tells them.
+    let notified = 0;
+    if (opts.notifyCustomers) {
+      const customers = await tx.shipmentLine.findMany({ where: { shipmentId }, distinct: ["customerId"], select: { customerId: true } });
+      const code = shipment.code.split("@")[0];
+      await tx.notification.createMany({
+        data: customers.map((c) => ({
+          audience: "CUSTOMER" as const,
+          type: "status",
+          customerId: c.customerId,
+          title: "Shipment status updated",
+          message: `${code}: ${publicStatusLabel(toStatus)}`,
+          status: "SENT" as const,
+          sentAt: new Date(),
+          createdByUserId: actor.id,
+        })),
+      });
+      notified = customers.length;
+    }
     await logAudit(tx, {
       actorUserId: actor.id,
       action: "shipment.status_change",
       entityType: "Shipment",
       entityId: shipmentId,
-      metadata: { from: shipment.status, to: toStatus },
+      metadata: { from: shipment.status, to: toStatus, notified },
     });
     return updated;
   });

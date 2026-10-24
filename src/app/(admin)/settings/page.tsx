@@ -1,47 +1,44 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { prisma } from "@/db/client";
+import { AuthorizationError } from "@/lib/errors";
+import { can } from "@/modules/authz/core";
 import { requireUser } from "@/modules/authz/session";
-import { LangToggle } from "@/i18n/LangToggle";
+import { getSettings, listCountries, listYears, SETTING_OPTIONS } from "@/modules/settings/service";
+import { getAdminScope } from "../scope";
+import { SettingsView } from "./SettingsView";
 
 export const metadata = { title: "Settings" };
 
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "12px 0", borderBottom: "1px solid var(--border-default)" }}>
-      <span style={{ color: "var(--text-muted)", fontSize: 14 }}>{label}</span>
-      <span style={{ color: "var(--text-strong)", fontWeight: 600 }}>{value}</span>
-    </div>
-  );
+function appVersion(): string {
+  try {
+    return (JSON.parse(readFileSync(path.join(process.cwd(), "package.json"), "utf8")) as { version?: string }).version ?? "—";
+  } catch {
+    return "—";
+  }
 }
 
+/** Settings (spec B15 / §16): shared by every country. */
 export default async function SettingsPage() {
   const user = await requireUser();
-  const [roleCount, permissionCount] = await Promise.all([prisma.role.count(), prisma.permission.count()]);
-
+  if (!can(user, "settings:read")) throw new AuthorizationError("Missing permission: settings:read");
+  const [settings, years, countries, scope, me] = await Promise.all([
+    getSettings(prisma),
+    listYears(prisma),
+    listCountries(prisma),
+    getAdminScope(user).catch(() => null),
+    prisma.user.findUnique({ where: { id: user.id }, select: { mfaEnabled: true } }),
+  ]);
   return (
-    <div style={{ maxWidth: 560, display: "flex", flexDirection: "column", gap: 24 }}>
-      <section
-        style={{
-          background: "var(--surface-card)",
-          border: "1px solid var(--border-default)",
-          borderRadius: "var(--radius-l)",
-          boxShadow: "var(--shadow-1)",
-          padding: 20,
-        }}
-      >
-        <div style={{ font: "700 15px var(--font-display)", color: "var(--text-strong)", marginBottom: 8 }}>General</div>
-        <Row label="Signed in as" value={user.email} />
-        <Row label="Business year" value={new Date().getFullYear()} />
-        <Row label="Roles configured" value={roleCount} />
-        <Row label="Permissions" value={permissionCount} />
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 12 }}>
-          <span style={{ color: "var(--text-muted)", fontSize: 14 }}>Language</span>
-          <LangToggle />
-        </div>
-      </section>
-      <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
-        Business rules for customs, taxes and exchange rates are configurable and await business-owner input (see the
-        decisions log). Role permissions are managed under Users &amp; Team.
-      </p>
-    </div>
+    <SettingsView
+      settings={settings}
+      years={years}
+      countries={countries}
+      options={SETTING_OPTIONS}
+      selectedYear={scope?.year ?? null}
+      mfaEnabled={!!me?.mfaEnabled}
+      canWrite={can(user, "settings:write")}
+      system={{ version: appVersion(), environment: process.env.NODE_ENV ?? "development", roles: await prisma.role.count(), permissions: await prisma.permission.count() }}
+    />
   );
 }

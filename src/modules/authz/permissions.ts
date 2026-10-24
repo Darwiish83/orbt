@@ -15,6 +15,9 @@ export const PERMISSIONS = [
   "operations:write",
   "transfer:read",
   "transfer:write",
+  // Money Transfer roles (Phase 17): come from the employee's Receiver / Sender setting.
+  "transfer:receive",
+  "transfer:send",
   "quotes:read",
   "quotes:write",
   "quotes:manage",
@@ -39,6 +42,13 @@ export const PERMISSIONS = [
   "audit:read",
   "self:read",
   "self:write",
+  // Accounting (Phase 16): read/write come with the employee's Accounting
+  // special access; manage = period closing. Cost sheets have their own editors.
+  "accounting:read",
+  "accounting:write",
+  "accounting:manage",
+  "costorigin:write",
+  "costmgq:write",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

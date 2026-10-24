@@ -70,14 +70,16 @@ export interface SpecInvoiceInput {
   brandRate?: Num;
   fatura?: Num;
   localDelivery?: Num;
+  /** "Others": a description and an amount (spec B9). */
   others?: Num;
+  othersDescription?: string | null;
   discount?: Num;
 }
 
 export interface SpecInvoice {
   lines: ChargeLineInput[];
   discount: Prisma.Decimal;
-  /** Rate the customer sees: base + quality + agent commission. */
+  /** Freight rate the customer sees: base + agent commission (never shown apart). */
   combinedRate: Prisma.Decimal;
   /** billed × agent rate — not shipment income; counts once the invoice is fully paid. */
   commissionAmount: Prisma.Decimal;
@@ -88,32 +90,38 @@ export interface SpecInvoice {
 }
 
 /**
- * Build an invoice the way spec §A6/§B9 describes it. The customer sees one
- * freight line at the combined rate; Brand / Fatura / Local Delivery / Others
- * appear only when entered; Discount is subtracted above the Total.
+ * Build an invoice the way spec §A6/§B9 and the design's CreateInvoiceDialog
+ * describe it. The customer sees one freight line at the combined rate (base +
+ * agent commission); Quality Control is its own line (billed × quality rate);
+ * Brand / Fatura / Local Delivery / Others appear only when entered; Discount
+ * is subtracted above the Total.
  */
 export function buildSpecInvoice(i: SpecInvoiceInput): SpecInvoice {
   const billed = nonNegative("Billed measure", d(i.billedMeasure));
   const actual = nonNegative("Actual measure", d(i.actualMeasure));
   if (billed.isZero()) throw new ValidationError("Billed measure must be greater than zero");
 
-  const combinedRate = nonNegative("Rate", d(i.baseRate))
-    .add(nonNegative("Quality", d(i.qualityRate)))
-    .add(nonNegative("Agent commission", d(i.agentRate)));
+  const combinedRate = nonNegative("Rate", d(i.baseRate)).add(nonNegative("Agent commission", d(i.agentRate)));
   if (combinedRate.isZero()) throw new ValidationError("Rate must be greater than zero");
 
   const lines: ChargeLineInput[] = [
     { category: "FREIGHT", description: "Freight", quantity: billed.toString(), unitPrice: combinedRate.toString() },
   ];
+  const quality = nonNegative("Quality", d(i.qualityRate));
+  if (quality.greaterThan(0)) {
+    lines.push({ category: "QUALITY", description: "Quality Control", quantity: billed.toString(), unitPrice: quality.toString() });
+  }
   const brandPcs = i.brandPcs ?? 0;
+  if (!Number.isInteger(brandPcs) || brandPcs < 0) throw new ValidationError("Brand PCS must be a whole number");
   const brandRate = nonNegative("Brand rate", d(i.brandRate));
   if (brandPcs > 0 && brandRate.greaterThan(0)) {
     lines.push({ category: "BRAND", description: "Brand", quantity: String(brandPcs), unitPrice: brandRate.toString() });
   }
+  const othersDescription = i.othersDescription?.trim().slice(0, 120) || "Others";
   const flat: [ChargeLineInput["category"], string, Num][] = [
     ["FATURA", "Fatura", i.fatura],
     ["LOCAL_DELIVERY", "Local Delivery", i.localDelivery],
-    ["OTHER", "Others", i.others],
+    ["OTHER", othersDescription, i.others],
   ];
   for (const [category, description, v] of flat) {
     const amount = nonNegative(description, d(v));

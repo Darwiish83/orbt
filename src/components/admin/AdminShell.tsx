@@ -8,6 +8,7 @@ import { Icon } from "@/ui/primitives";
 import { useT } from "@/i18n/I18nProvider";
 import { LangToggle } from "@/i18n/LangToggle";
 import type { AdminNavItem } from "./adminNav";
+import { ScopeSelect, type ScopeOptions } from "./ScopeSelect";
 
 /**
  * Navy admin shell: 248px sidebar + 68px topbar. On phones the sidebar becomes
@@ -19,11 +20,14 @@ export function AdminShell({
   items,
   userEmail,
   onLogout,
+  scope,
 }: {
   children: React.ReactNode;
   items: AdminNavItem[];
   userEmail?: string;
   onLogout?: () => void | Promise<void>;
+  /** Year + Country selector; omitted when the user has no assigned scope. */
+  scope?: ScopeOptions;
 }) {
   const t = useT();
   const pathname = usePathname();
@@ -45,13 +49,13 @@ export function AdminShell({
 
       {/* Sidebar / drawer */}
       <aside className="admin-sidebar" data-open={navOpen}>
-        <div style={{ padding: "4px 12px 14px" }}>
+        <div style={{ padding: "6px 12px 16px" }}>
           <Image
             src="/brand/orbit-logo-reversed.png"
             alt="OrbitCargo"
-            width={132}
-            height={34}
-            style={{ height: 34, width: "auto" }}
+            width={210}
+            height={54}
+            style={{ height: 54, width: "auto", maxWidth: "100%" }}
             priority
           />
         </div>
@@ -173,6 +177,7 @@ export function AdminShell({
           >
             {t(title)}
           </div>
+          {scope && <ScopeSelect scope={scope} />}
           <LangToggle />
         </header>
         <main className="admin-content">

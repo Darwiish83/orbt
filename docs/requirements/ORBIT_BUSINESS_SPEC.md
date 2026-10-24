@@ -11,6 +11,7 @@
 | Customer Level from yearly invoiced value (A ≥ $10,000 …) | **Keep ADR-014**: level from yearly KG/CBM. |
 | Customer: Reference + Password; Admin: 3-step login | **Adopt the spec's flows** (ADR-016). This replaces the single shared form built on 2026-10-20. |
 | Shipment status: only 4 | **Adopt: 4 statuses** (ADR-017). `DELIVERED` and `ON_HOLD` are removed; Transit is Air-only. |
+| Out categories: only 5, yet partner payouts go through "Out → Profit payout" (revised admin prompt, 2026-10-24) | **6 categories**, Profit payout added (ADR-019). |
 
 ---
 

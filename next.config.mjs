@@ -15,6 +15,8 @@ const nextConfig = {
     // Allow Server Actions when the app is reached via a Cloudflare quick
     // tunnel (dev sharing) in addition to the local origin.
     serverActions: {
+      // Announcement images are capped at 2 MB by the service.
+      bodySizeLimit: "3mb",
       allowedOrigins: ["localhost:3100", "*.trycloudflare.com"],
     },
   },

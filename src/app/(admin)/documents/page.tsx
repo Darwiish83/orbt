@@ -1,50 +1,32 @@
 import { prisma } from "@/db/client";
+import { AuthorizationError } from "@/lib/errors";
+import { displayShipmentCode } from "@/modules/authz/adminScope";
 import { can } from "@/modules/authz/core";
-import { listDocuments } from "@/modules/documents/service";
 import { requireUser } from "@/modules/authz/session";
-import { Icon } from "@/ui/primitives";
+import { listAdminDocuments } from "@/modules/documents/admin";
+import { getAdminScope } from "../scope";
+import { DocumentsView } from "./DocumentsView";
 
 export const metadata = { title: "Documents" };
 
-const sizeLabel = (b: number) => (b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`);
-
-export default async function AdminDocumentsPage() {
+/** Documents (spec B12 / §13) for the top bar's country + year. */
+export default async function DocumentsPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const user = await requireUser();
-  if (!can(user, "documents:read")) {
-    return <p style={{ color: "var(--text-muted)" }}>You do not have access to documents.</p>;
-  }
-  const { items } = await listDocuments(prisma, user, { pageSize: 50 });
-
+  if (!can(user, "documents:read")) throw new AuthorizationError("Missing permission: documents:read");
+  const sp = await searchParams;
+  const scope = await getAdminScope(user);
+  const mode = sp.mode === "AIR" || sp.mode === "SEA" ? sp.mode : undefined;
+  const [data, shipments] = await Promise.all([
+    listAdminDocuments(prisma, user, { year: scope.year, country: scope.country, from: sp.from, to: sp.to, mode, shipmentId: sp.ship, customerId: sp.cust, q: sp.q, page: Number(sp.page) || 1 }),
+    prisma.shipment.findMany({ where: { originCountry: scope.country, businessYear: scope.year }, select: { id: true, code: true, mode: true }, orderBy: { createdAt: "asc" }, take: 500 }),
+  ]);
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {items.length === 0 ? (
-        <p style={{ color: "var(--text-muted)" }}>No documents uploaded yet.</p>
-      ) : (
-        items.map((d) => (
-          <div
-            key={d.id}
-            style={{
-              background: "var(--surface-card)",
-              border: "1px solid var(--border-default)",
-              borderRadius: "var(--radius-l)",
-              boxShadow: "var(--shadow-1)",
-              padding: "12px 16px",
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-            }}
-          >
-            <Icon name="FileText" size={18} color="var(--navy-700)" />
-            <span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{d.filename ?? "Document"}</span>
-            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              {d.kind} · {sizeLabel(d.size)}
-            </span>
-            <a href={`/api/documents/${d.id}/download`} style={{ marginLeft: "auto", color: "var(--navy-700)", fontWeight: 600, textDecoration: "none" }}>
-              Download
-            </a>
-          </div>
-        ))
-      )}
-    </div>
+    <DocumentsView
+      data={data}
+      shipments={shipments.map((s) => ({ id: s.id, code: displayShipmentCode(s.code), mode: s.mode }))}
+      scope={{ year: scope.year, country: scope.country }}
+      filters={{ from: sp.from ?? "", to: sp.to ?? "", mode: mode ?? "ALL", ship: sp.ship ?? "", q: sp.q ?? "" }}
+      perms={{ write: can(user, "documents:write"), manage: can(user, "documents:manage") }}
+    />
   );
 }

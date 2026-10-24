@@ -1,53 +1,90 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/db/client";
-import { AuthorizationError, ValidationError } from "@/lib/errors";
 import { requireUser } from "@/modules/authz/session";
-import { createTransfer, receiveTransfer, sendTransfer } from "@/modules/transfer/service";
+import { addReceive, deleteReceive, deleteSend, editReceive, recordSend, setHanded, startNewMonth } from "@/modules/transfer/money";
+import { getAdminScope } from "../scope";
+import { runAction } from "../runAction";
 
-export type ActionState = { error: string | null; ok?: boolean };
-
-const schema = z.object({
-  amount: z.string().min(1),
-  fromCountry: z.string().min(1),
-  toCountry: z.string().min(1),
-  businessYear: z.coerce.number().int().min(2000).max(2100),
-  note: z.string().optional(),
+const id = z.string().min(1).max(64);
+const receive = z.object({
+  country: z.string().min(1).max(60),
+  kind: z.enum(["CUSTOMER", "OPERATION"]),
+  receivedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  amount: z.string().max(20),
+  feePct: z.string().max(10).optional(),
+  currency: z.string().max(5),
+  description: z.string().max(160),
+  tag: z.enum(["CLOTHES", "MEDICINE", "OTHER"]).nullable().optional(),
 });
+export type ReceiveValues = z.input<typeof receive>;
+const send = z.object({
+  sentAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  amount: z.string().max(20),
+  currency: z.string().max(5),
+  status: z.enum(["PAID", "PENDING"]),
+});
+export type SendValues = z.input<typeof send>;
+const paths = ["/transfer", "/accounting"];
 
-export async function createTransferAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const user = await requireUser();
-  const parsed = schema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { error: "Check the transfer details" };
-  try {
-    await createTransfer(prisma, user, parsed.data);
-  } catch (e) {
-    if (e instanceof AuthorizationError) return { error: e.message };
-    if (e instanceof ValidationError) return { error: e.message };
-    throw e;
-  }
-  revalidatePath("/transfer");
-  return { error: null, ok: true };
+export async function saveReceiveAction(rowId: string | null, values: ReceiveValues) {
+  return runAction(
+    "transfer",
+    async () => {
+      const user = await requireUser();
+      const scope = await getAdminScope(user).catch(() => null);
+      const v = receive.parse(values);
+      const input = { ...v, year: scope?.year ?? Number(v.receivedAt.slice(0, 4)) };
+      if (rowId) await editReceive(prisma, user, id.parse(rowId), input);
+      else await addReceive(prisma, user, input);
+    },
+    paths,
+  );
 }
 
-export async function sendTransferAction(formData: FormData): Promise<void> {
-  const user = await requireUser();
-  try {
-    await sendTransfer(prisma, user, String(formData.get("id") ?? ""));
-  } catch {
-    return;
-  }
-  revalidatePath("/transfer");
+export async function handedAction(rowId: string, handed: boolean) {
+  return runAction(
+    "transfer",
+    async () => {
+      const user = await requireUser();
+      await setHanded(prisma, user, id.parse(rowId), z.boolean().parse(handed));
+    },
+    paths,
+  );
 }
 
-export async function receiveTransferAction(formData: FormData): Promise<void> {
-  const user = await requireUser();
-  try {
-    await receiveTransfer(prisma, user, String(formData.get("id") ?? ""));
-  } catch {
-    return;
-  }
-  revalidatePath("/transfer");
+export async function saveSendAction(rowId: string, values: SendValues) {
+  return runAction(
+    "transfer",
+    async () => {
+      const user = await requireUser();
+      await recordSend(prisma, user, id.parse(rowId), send.parse(values));
+    },
+    paths,
+  );
+}
+
+export async function deleteAction(rowId: string, part: "receive" | "send") {
+  return runAction(
+    "transfer",
+    async () => {
+      const user = await requireUser();
+      if (z.enum(["receive", "send"]).parse(part) === "send") await deleteSend(prisma, user, id.parse(rowId));
+      else await deleteReceive(prisma, user, id.parse(rowId));
+    },
+    paths,
+  );
+}
+
+export async function newMonthAction(country: string) {
+  return runAction(
+    "transfer",
+    async () => {
+      const user = await requireUser();
+      const scope = await getAdminScope(user).catch(() => null);
+      return startNewMonth(prisma, user, { country: z.string().max(60).parse(country), year: scope?.year ?? new Date().getUTCFullYear() });
+    },
+    paths,
+  );
 }

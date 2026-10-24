@@ -13,6 +13,7 @@ const PROTECTED_PREFIXES = [
   "/operations",
   "/finance",
   "/transfer",
+  "/shipment-cost",
   "/documents",
   "/reports",
   "/users",
@@ -20,6 +21,8 @@ const PROTECTED_PREFIXES = [
   "/settings",
   "/account",
   "/mfa",
+  "/print",
+  "/accounting",
 ];
 
 function buildCsp(nonce: string, isDev: boolean): string {

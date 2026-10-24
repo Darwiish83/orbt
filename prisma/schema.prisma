@@ -108,6 +108,13 @@ enum ChargeCategory {
   CUSTOMS_TAX
   SERVICE
   OTHER
+  QUALITY // quality-control charge per measure unit (shown as its own invoice line)
+  DEMURRAGE // added only after an admin approves it (spec B9 Reminders)
+}
+
+enum ReminderKind {
+  PAYMENT
+  DEMURRAGE_WARNING
 }
 
 enum ReceiptDirection {
@@ -161,16 +168,19 @@ enum NotificationStatus {
 // ------------------------------------------------------- identity & access
 
 model User {
-  id           String     @id @default(cuid())
-  email        String     @unique
-  passwordHash String? // Argon2id; set on account setup
-  status       UserStatus @default(INVITED)
-  mfaEnabled   Boolean    @default(false)
-  mfaSecret    String? // TOTP secret, AES-256-GCM encrypted at rest
+  id                String     @id @default(cuid())
+  email             String     @unique
+  passwordHash      String? // Argon2id; set on account setup
+  status            UserStatus @default(INVITED)
+  mfaEnabled        Boolean    @default(false)
+  mfaSecret         String? // TOTP secret, AES-256-GCM encrypted at rest
   // Bumped to invalidate all existing JWT sessions (password reset / forced
   // logout). The authorization layer compares this on every protected access.
-  sessionEpoch Int        @default(0)
-  lockedUntil  DateTime?
+  sessionEpoch      Int        @default(0)
+  lockedUntil       DateTime?
+  lastLoginAt       DateTime?
+  // Accounting PIN (per user, hashed; spec §11 / owner answer Q4).
+  accountingPinHash String?
 
   // A user is EITHER staff (employee) OR a customer contact — enforced by a
   // CHECK constraint in the migration (not both set).
@@ -282,14 +292,21 @@ model UserRole {
 }
 
 model Employee {
-  id           String       @id @default(cuid())
-  code         String       @unique // EMP-###
-  name         String
-  phone        String?
-  email        String?
-  department   Department
-  active       Boolean      @default(true)
-  transferRole TransferRole @default(NONE)
+  id                String       @id @default(cuid())
+  code              String       @unique // EMP-###
+  name              String
+  phone             String?
+  email             String?
+  department        Department
+  active            Boolean      @default(true)
+  transferRole      TransferRole @default(NONE)
+  // Money Transfer countries (spec §5: Sender is usually Turkey only).
+  transferCountries String[]     @default([])
+  // Special access → Accounting (spec §5): only these users get the PIN screen.
+  accountingAccess  Boolean      @default(false)
+  // Access time window (spec §5): outside it the account has no permissions.
+  accessFrom        DateTime?
+  accessUntil       DateTime?
 
   user       User?
   scopes     EmployeeScope[]
@@ -385,6 +402,8 @@ model Shipment {
   quotes     Quote[]
   invoices   Invoice[]
   documents  Document[]
+  costSheet  ShipmentCostSheet?
+  cashOuts   CashOut[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -425,28 +444,34 @@ model RoadDetail {
 
 // Cargo line associating a customer's goods with a consolidation shipment.
 model ShipmentLine {
-  id                 String   @id @default(cuid())
+  id                 String    @id @default(cuid())
   shipmentId         String
-  shipment           Shipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  shipment           Shipment  @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
   customerId         String
-  customer           Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  customer           Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
   description        String?
   packages           Int?
-  chargeableWeightKg Decimal? @db.Decimal(12, 3)
-  volumeCbm          Decimal? @db.Decimal(12, 3)
+  chargeableWeightKg Decimal?  @db.Decimal(12, 3)
+  volumeCbm          Decimal?  @db.Decimal(12, 3)
   // MIX: a box shared with other customers. Measure (air) = KG + MIX KG.
   mixCount           Int?
-  mixKg              Decimal? @db.Decimal(12, 3)
+  mixKg              Decimal?  @db.Decimal(12, 3)
   // Charges (ADR-013). Line total is computed server-side, never stored from the browser.
-  rate               Decimal? @db.Decimal(14, 2) // per kg (air) / per CBM (sea)
-  qualityRate        Decimal? @db.Decimal(14, 2) // per measure unit
+  rate               Decimal?  @db.Decimal(14, 2) // per kg (air) / per CBM (sea)
+  qualityRate        Decimal?  @db.Decimal(14, 2) // per measure unit
   brandPcs           Int?
-  brandRate          Decimal? @db.Decimal(14, 2)
-  fatura             Decimal? @db.Decimal(14, 2)
-  delivery           Decimal? @db.Decimal(14, 2)
-  other              Decimal? @db.Decimal(14, 2)
-  discount           Decimal? @db.Decimal(14, 2)
+  brandRate          Decimal?  @db.Decimal(14, 2)
+  fatura             Decimal?  @db.Decimal(14, 2)
+  delivery           Decimal?  @db.Decimal(14, 2)
+  other              Decimal?  @db.Decimal(14, 2)
+  discount           Decimal?  @db.Decimal(14, 2)
   note               String?
+  // Demurrage (spec B9 Reminders): cargo collected at MGQ stops the clock;
+  // extra free days are granted per customer line by Finance.
+  collectedAt        DateTime?
+  extraFreeDays      Int       @default(0)
+  // Shipments → customer list "Notification": last update sent to the customer.
+  notifiedAt         DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
@@ -524,14 +549,53 @@ model Invoice {
   businessYear     Int?
   createdByUserId  String?
 
-  lines       ChargeLineItem[]
-  allocations PaymentAllocation[]
+  lines              ChargeLineItem[]
+  allocations        PaymentAllocation[]
+  revisions          InvoiceRevision[]
+  reminders          PaymentReminder[]
+  commissionPayments CommissionPayment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // One live (non-VOID) invoice per customer per shipment: partial unique
+  // index "Invoice_shipment_customer_live_key" in migration 20261024090000.
   @@index([customerId])
   @@index([status])
+  @@index([shipmentId])
+}
+
+// Invoice History → Invoice changes (spec B9). Append-only: one row per changed
+// field, with the before/after shown to staff exactly as stored.
+model InvoiceRevision {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  field       String // English label key, e.g. "Rate (USD)"
+  before      String
+  after       String
+  actorUserId String?
+  createdAt   DateTime @default(now())
+
+  @@index([invoiceId, createdAt])
+  @@index([createdAt])
+}
+
+// Reminders sent from Finance (payment reminder / demurrage warning). Penalties
+// are never added here; an approved demurrage is a DEMURRAGE invoice line.
+model PaymentReminder {
+  id             String       @id @default(cuid())
+  kind           ReminderKind
+  invoiceId      String?
+  invoice        Invoice?     @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  shipmentId     String
+  customerId     String
+  notificationId String?
+  actorUserId    String?
+  createdAt      DateTime     @default(now())
+
+  @@index([shipmentId, customerId, kind])
+  @@index([invoiceId])
 }
 
 // Exactly one parent (quote XOR invoice) — enforced by CHECK in the migration.
@@ -602,6 +666,7 @@ model Document {
   kind             DocumentKind
   storageKey       String             @unique // server-generated, never the user filename
   filename         String? // sanitized original name, for display/download only
+  reference        String? // staff-typed document reference (spec §13), e.g. a packing list no.
   contentType      String
   size             Int
   checksum         String?
@@ -635,6 +700,11 @@ model Notification {
   roleId          String?
   role            Role?                @relation(fields: [roleId], references: [id], onDelete: SetNull)
   createdByUserId String?
+  // Schedule Announcement (spec §9): last day, flight/departure date, origin,
+  // destination; an optional image kept in private storage.
+  details         Json?
+  imageKey        String?
+  imageType       String?
 
   createdAt DateTime @default(now())
 
@@ -708,8 +778,12 @@ model Bank {
   active        Boolean @default(true)
   sortOrder     Int     @default(0)
 
-  payments Payment[]
-  receipts Receipt[]
+  payments       Payment[]
+  receipts       Receipt[]
+  cashOuts       CashOut[]
+  debtReturns    DebtReturn[]
+  cashCounts     CashCount[]
+  openingEntries OpeningEntry[]
 
   createdAt DateTime @default(now())
 }
@@ -752,6 +826,11 @@ model Receipt {
   note         String?
   actorUserId  String?
   issuedAt     DateTime         @default(now())
+  // Set when the money movement was reversed (e.g. a payment corrected or
+  // deleted in Finance). The receipt is kept for the audit trail.
+  reversedAt   DateTime?
+  cashOut      CashOut?
+  debtReturn   DebtReturn?
 
   createdAt DateTime @default(now())
 
@@ -789,4 +868,265 @@ model OtpCode {
   createdAt  DateTime   @default(now())
 
   @@index([email, purpose, createdAt])
+}
+
+// Settings (spec §16) that admins edit: company profile, general, notification
+// switches. One JSON value per section key.
+model AppSetting {
+  key             String   @id
+  value           Json
+  updatedByUserId String?
+  updatedAt       DateTime @updatedAt
+}
+
+// ------------------------------------------------------------------ Accounting (Phase 16, spec §11)
+
+enum CostStage {
+  ORIGIN
+  TRANSIT // Air only
+  ARRIVED // always Mogadishu (MGQ)
+}
+
+enum OutCategory {
+  SHIPMENT_COST
+  EXPENSE
+  COMMISSION
+  TRANSFER
+  DEBT
+  PROFIT_PAYOUT // ADR-019
+}
+
+enum Partner {
+  SOMALI_TRANSPORT
+  MAHAD
+}
+
+enum ClosePeriod {
+  H1
+  H2
+  YEAR
+}
+
+// Per-shipment cost sheets. `origin` is filled by the origin-country staff,
+// `mgq` by the Somalia staff; every derived figure is computed on the server.
+model ShipmentCostSheet {
+  shipmentId      String   @id
+  shipment        Shipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  origin          Json     @default("{}")
+  mgq             Json     @default("{}")
+  originUpdatedBy String?
+  mgqUpdatedBy    String?
+  updatedAt       DateTime @updatedAt
+}
+
+// Every payment out of a country's money (Income & Out → + Add Out). Each one
+// has a receipt; a correction reverses it instead of deleting it.
+model CashOut {
+  id          String      @id @default(cuid())
+  country     String
+  year        Int
+  category    OutCategory
+  shipmentId  String?
+  shipment    Shipment?   @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  stage       CostStage?
+  partner     Partner?
+  bankId      String
+  bank        Bank        @relation(fields: [bankId], references: [id], onDelete: Restrict)
+  sentTo      String? // recipient name + bank/phone (printed on the receipt)
+  amount      Decimal     @db.Decimal(14, 2)
+  // Paid now for an earlier year (owner 2026-10-24), e.g. 2025 shipment W-30:
+  // it comes out of what that year left in the opening balance, once.
+  forYear     Int?
+  reference   String? // e.g. "W-30" when the shipment is not in the system
+  paidAt      DateTime
+  note        String?
+  receiptId   String      @unique
+  receipt     Receipt     @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  actorUserId String?
+  reversedAt  DateTime?
+  createdAt   DateTime    @default(now())
+
+  commissions CommissionPayment[]
+  returns     DebtReturn[]
+
+  @@index([country, year, category])
+  @@index([shipmentId])
+}
+
+// One commission payout can settle several invoices' commissions.
+model CommissionPayment {
+  id        String  @id @default(cuid())
+  cashOutId String
+  cashOut   CashOut @relation(fields: [cashOutId], references: [id], onDelete: Restrict)
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  amount    Decimal @db.Decimal(14, 2)
+
+  @@index([invoiceId])
+}
+
+// Money returned on a debt (an Out → Debt, or a debt carried from an earlier
+// year as an OpeningEntry). Posts to Income. Exactly one of the two is set.
+model DebtReturn {
+  id             String        @id @default(cuid())
+  cashOutId      String?
+  cashOut        CashOut?      @relation(fields: [cashOutId], references: [id], onDelete: Restrict)
+  openingEntryId String?
+  openingEntry   OpeningEntry? @relation(fields: [openingEntryId], references: [id], onDelete: Restrict)
+  amount         Decimal       @db.Decimal(14, 2)
+  bankId         String
+  bank           Bank          @relation(fields: [bankId], references: [id], onDelete: Restrict)
+  returnedAt     DateTime
+  receiptId      String        @unique
+  receipt        Receipt       @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  actorUserId    String?
+  createdAt      DateTime      @default(now())
+
+  @@index([cashOutId])
+  @@index([openingEntryId])
+}
+
+// The admin's count of what is in each bank / cash for a country (checked
+// against the computed balance).
+model CashCount {
+  id          String   @id @default(cuid())
+  country     String
+  bankId      String
+  bank        Bank     @relation(fields: [bankId], references: [id], onDelete: Restrict)
+  amount      Decimal  @db.Decimal(14, 2)
+  countedAt   DateTime @default(now())
+  actorUserId String?
+
+  @@index([country, bankId, countedAt])
+}
+
+// Period closing: a closed period can't be changed (Finance or Accounting).
+model PeriodClose {
+  id          String      @id @default(cuid())
+  country     String
+  year        Int
+  period      ClosePeriod
+  fromDate    DateTime
+  toDate      DateTime
+  closedAt    DateTime    @default(now())
+  actorUserId String?
+
+  @@unique([country, year, period])
+}
+
+// Balance carried into a new year (from the previous year's closing balance).
+// Balance brought forward from earlier years, one line per source (owner
+// 2026-10-24). Typed by the admin for years before the system, or written
+// when the previous year is closed (carried = true). Corrections reverse a
+// line; nothing is deleted. Legacy OpeningBalance rows still count.
+enum OpeningSource {
+  PROFIT
+  TRANSFER
+  COMMISSION
+  SOMALI_TRANSPORT
+  MAHAD
+  DEBT
+  SHIPMENT_COST
+  OTHER
+}
+
+// How an earlier year is entered (owner 2026-10-24): first its TOTAL balance,
+// then where it is (BANK lines) and what it is (SOURCE lines). Both splits must
+// add up to the total. DEBT lines are money owed to us, outside the balance.
+enum OpeningLineKind {
+  TOTAL
+  BANK
+  SOURCE
+  DEBT
+}
+
+model OpeningEntry {
+  id          String          @id @default(cuid())
+  country     String
+  year        Int // the year this balance opens
+  fromYear    Int // the year it came from
+  kind        OpeningLineKind @default(SOURCE)
+  source      OpeningSource? // SOURCE and DEBT lines
+  amount      Decimal         @db.Decimal(14, 2) // + we hold it, − we owe / lost; DEBT: owed to us (> 0, not in the balance)
+  bankId      String? // BANK lines (null = not in a bank, only when carried)
+  bank        Bank?           @relation(fields: [bankId], references: [id], onDelete: Restrict)
+  person      String? // DEBT: who owes us
+  note        String?
+  carried     Boolean         @default(false)
+  actorUserId String?
+  reversedAt  DateTime?
+  reversedBy  String?
+  createdAt   DateTime        @default(now())
+
+  returns DebtReturn[]
+
+  @@index([country, year])
+}
+
+model OpeningBalance {
+  country     String
+  year        Int
+  amount      Decimal  @db.Decimal(14, 2)
+  createdAt   DateTime @default(now())
+  actorUserId String?
+
+  @@id([country, year])
+}
+
+// ------------------------------------------------------------------ Money Transfer (Phase 17, spec §12)
+
+enum TransferKind {
+  CUSTOMER // money customers send to people
+  OPERATION // origin-cost money only; a record, not income
+}
+
+enum TransferTag {
+  CLOTHES
+  MEDICINE
+  OTHER
+}
+
+enum TransferSendStatus {
+  PAID
+  PENDING
+}
+
+// One row of the Money Status Report. The Receiver fills the left side and
+// hands the money to the Sender (orange → green); only then can the Sender
+// record the right side. Rows are soft-deleted.
+model MoneyTransferRow {
+  id             String              @id @default(cuid())
+  country        String
+  year           Int
+  month          Int
+  kind           TransferKind
+  receivedAt     DateTime            @db.Date
+  amount         Decimal             @db.Decimal(14, 2) // total received
+  feePct         Decimal             @default(0) @db.Decimal(5, 2)
+  currency       String              @default("USD")
+  description    String
+  tag            TransferTag?
+  receiverUserId String?
+  handedAt       DateTime?
+  sentAt         DateTime?           @db.Date
+  sentAmount     Decimal?            @db.Decimal(14, 2) // taken from the customer
+  sentCurrency   String?
+  sentStatus     TransferSendStatus?
+  senderUserId   String?
+  deletedAt      DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([country, year, month, kind])
+}
+
+// "Start new month": months opened on the report (per country + year).
+model TransferMonth {
+  country     String
+  year        Int
+  month       Int
+  openedAt    DateTime @default(now())
+  actorUserId String?
+
+  @@id([country, year, month])
 }

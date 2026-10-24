@@ -221,7 +221,7 @@ describe("line totals (ADR-013)", () => {
 });
 
 describe("spec invoice (B9 / A6)", () => {
-  it("shows one combined rate, only entered extras, discount before total, and computes commission", () => {
+  it("shows one combined rate (base + commission), Quality as its own line, only entered extras, discount before total", () => {
     const inv = buildSpecInvoice({
       actualMeasure: "98",
       billedMeasure: "100",
@@ -233,8 +233,8 @@ describe("spec invoice (B9 / A6)", () => {
       localDelivery: "0", // not entered → no line
       discount: "10",
     });
-    expect(inv.combinedRate.toString()).toBe("7.5");
-    expect(inv.lines.map((l) => l.category)).toEqual(["FREIGHT", "FATURA"]);
+    expect(inv.combinedRate.toString()).toBe("7");
+    expect(inv.lines.map((l) => l.category)).toEqual(["FREIGHT", "QUALITY", "FATURA"]);
     expect(inv.subtotal.toString()).toBe("770");
     expect(inv.total.toString()).toBe("760");
     expect(inv.commissionAmount.toString()).toBe("100");

@@ -1,70 +1,45 @@
+import type { Department } from "@prisma/client";
 import { prisma } from "@/db/client";
+import { AuthorizationError } from "@/lib/errors";
 import { can } from "@/modules/authz/core";
-import { listUsers } from "@/modules/users/service";
+import { ADMIN_MODULES } from "@/modules/authz/modules";
 import { requireUser } from "@/modules/authz/session";
-import { Badge } from "@/ui/primitives";
-import { InviteUserForm } from "./InviteUserForm";
-import { RoleControls } from "./RoleControls";
+import { listActivity, listEmployees, roleMatrix } from "@/modules/users/admin";
+import { UsersView } from "./UsersView";
 
 export const metadata = { title: "Users & Team" };
 
-export default async function UsersPage() {
+const DEPTS: Department[] = ["MANAGEMENT", "OPERATIONS", "FINANCE", "CUSTOMER_SERVICE", "DOCUMENTS", "REPORTS"];
+
+/** Users & Team (spec B4 / §5): shared by all countries. */
+export default async function UsersPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const user = await requireUser();
-  if (!can(user, "users:read")) {
-    return <p style={{ color: "var(--text-muted)" }}>You do not have access to user management.</p>;
-  }
-
-  const [{ items }, roles] = await Promise.all([
-    listUsers(prisma, user, { pageSize: 50 }),
-    prisma.role.findMany({ where: { key: { not: "customer" } }, select: { key: true, name: true }, orderBy: { name: "asc" } }),
+  if (!can(user, "users:read")) throw new AuthorizationError("Missing permission: users:read");
+  const sp = await searchParams;
+  const tab = sp.tab === "roles" || sp.tab === "activity" ? sp.tab : "team";
+  const dept = DEPTS.includes(sp.dept as Department) ? (sp.dept as Department) : undefined;
+  const [team, matrix, roles, countries] = await Promise.all([
+    listEmployees(prisma, user, { q: sp.q, department: dept }),
+    roleMatrix(prisma, user),
+    prisma.role.findMany({ where: { key: { not: "customer" } }, orderBy: { name: "asc" }, select: { key: true, name: true } }),
+    prisma.country.findMany({ where: { active: true, isOrigin: true }, orderBy: { createdAt: "asc" }, select: { name: true } }),
   ]);
-  const canManage = can(user, "users:manage");
-
+  const activity =
+    tab === "activity" && can(user, "audit:read")
+      ? await listActivity(prisma, user, { q: sp.aq, entity: sp.entity, day: sp.day, page: Number(sp.page) || 1 })
+      : null;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      {canManage && <InviteUserForm />}
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {items.map((u) => (
-          <div
-            key={u.id}
-            style={{
-              background: "var(--surface-card)",
-              border: "1px solid var(--border-default)",
-              borderRadius: "var(--radius-l)",
-              boxShadow: "var(--shadow-1)",
-              padding: 16,
-              display: "flex",
-              gap: 16,
-              alignItems: "flex-start",
-              flexWrap: "wrap",
-            }}
-          >
-            <div style={{ minWidth: 200 }}>
-              <div style={{ font: "600 14px var(--font-body)", color: "var(--text-strong)" }}>{u.email}</div>
-              <div style={{ font: "500 12px var(--font-mono)", color: "var(--text-muted)" }}>
-                {u.employee?.code ?? "—"} ·{" "}
-                <Badge tone={u.status === "ACTIVE" ? "success" : u.status === "SUSPENDED" ? "danger" : "neutral"}>
-                  {u.status}
-                </Badge>
-              </div>
-            </div>
-            <div style={{ flex: 1, minWidth: 260 }}>
-              {canManage ? (
-                <RoleControls userId={u.id} roleKeys={u.roles.map((r) => r.role.key)} allRoles={roles} status={u.status} />
-              ) : (
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {u.roles.map((r) => (
-                    <Badge key={r.role.key} tone="brand">
-                      {r.role.key}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
+    <UsersView
+      tab={tab}
+      filters={{ q: sp.q ?? "", dept: dept ?? "ALL", aq: sp.aq ?? "", entity: sp.entity ?? "", day: sp.day ?? "" }}
+      team={team}
+      matrix={matrix}
+      modules={ADMIN_MODULES.map((m) => ({ key: m.key, label: m.label }))}
+      roles={roles.filter((r) => user.isSuperAdmin || r.key !== "super_admin")}
+      countries={countries.map((c) => c.name)}
+      activity={activity}
+      me={user.id}
+      perms={{ manage: can(user, "users:manage"), superAdmin: user.isSuperAdmin, audit: can(user, "audit:read") }}
+    />
   );
 }

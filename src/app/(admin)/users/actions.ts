@@ -1,65 +1,89 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/db/client";
-import { AuthorizationError } from "@/lib/errors";
-import { assignRole } from "@/modules/auth/accounts";
 import { requireUser } from "@/modules/authz/session";
-import { createEmployeeUser, removeRole, setUserStatus } from "@/modules/users/service";
+import { createEmployee, getEmployee, setEmployeeActive, setRoleModule, updateEmployee } from "@/modules/users/admin";
+import { resetPin } from "@/modules/accounting/pin";
+import { runAction } from "../runAction";
 
-export type ActionState = { error: string | null; ok?: boolean };
-
-const inviteSchema = z.object({
-  email: z.string().email(),
-  name: z.string().min(1),
+const level = z.enum(["NONE", "VIEW", "EDIT"]);
+const day = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .transform((d) => new Date(`${d}T00:00:00Z`));
+const form = z.object({
+  name: z.string().trim().min(1).max(120),
+  email: z.string().trim().email().max(160),
+  phone: z.string().trim().max(40).optional(),
   department: z.enum(["MANAGEMENT", "OPERATIONS", "FINANCE", "CUSTOMER_SERVICE", "DOCUMENTS", "REPORTS"]),
+  roleKeys: z.array(z.string().max(60)).max(20),
+  countries: z.array(z.string().max(60)).max(50),
+  access: z.record(z.string().max(30), level.nullable()),
+  accountingAccess: z.boolean(),
+  transferRole: z.enum(["NONE", "SEND", "RECEIVE"]),
+  transferCountries: z.array(z.string().max(60)).max(50),
+  accessFrom: day.optional().or(z.literal("").transform(() => null)),
+  accessUntil: day.optional().or(z.literal("").transform(() => null)),
 });
+export type EmployeeFormValues = z.input<typeof form>;
+const id = z.string().min(1).max(64);
 
-function toMessage(e: unknown): string {
-  if (e instanceof AuthorizationError) return e.message;
-  throw e;
+export async function saveEmployeeAction(userId: string | null, values: EmployeeFormValues) {
+  return runAction(
+    "users",
+    async () => {
+      const user = await requireUser();
+      const v = form.parse(values);
+      // The window ends at the end of its last day.
+      const input = { ...v, accessUntil: v.accessUntil ? new Date(v.accessUntil.getTime() + 86_399_000) : null };
+      if (userId) {
+        await updateEmployee(prisma, user, id.parse(userId), input);
+        return { code: null };
+      }
+      return createEmployee(prisma, user, input);
+    },
+    ["/users"],
+  );
 }
 
-export async function inviteUserAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const user = await requireUser();
-  const parsed = inviteSchema.safeParse({
-    email: formData.get("email"),
-    name: formData.get("name"),
-    department: formData.get("department"),
+export async function loadEmployeeAction(userId: string) {
+  return runAction("users", async () => {
+    const user = await requireUser();
+    return getEmployee(prisma, user, id.parse(userId));
   });
-  if (!parsed.success) return { error: "Enter a name, valid email and department" };
-  try {
-    await createEmployeeUser(prisma, user, parsed.data);
-  } catch (e) {
-    return { error: toMessage(e) };
-  }
-  revalidatePath("/users");
-  return { error: null, ok: true };
 }
 
-export async function assignRoleAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const user = await requireUser();
-  const targetUserId = String(formData.get("userId") ?? "");
-  const roleKey = String(formData.get("roleKey") ?? "");
-  try {
-    await assignRole(prisma, user, targetUserId, roleKey);
-  } catch (e) {
-    return { error: toMessage(e) };
-  }
-  revalidatePath("/users");
-  return { error: null, ok: true };
+export async function setEmployeeActiveAction(userId: string, active: boolean) {
+  return runAction(
+    "users",
+    async () => {
+      const user = await requireUser();
+      await setEmployeeActive(prisma, user, id.parse(userId), z.boolean().parse(active));
+    },
+    ["/users"],
+  );
 }
 
-export async function removeRoleAction(formData: FormData): Promise<void> {
-  const user = await requireUser();
-  await removeRole(prisma, user, String(formData.get("userId") ?? ""), String(formData.get("roleKey") ?? ""));
-  revalidatePath("/users");
+export async function setRoleModuleAction(roleKey: string, moduleKey: string, value: string) {
+  return runAction(
+    "users",
+    async () => {
+      const user = await requireUser();
+      await setRoleModule(prisma, user, z.string().max(60).parse(roleKey), z.string().max(30).parse(moduleKey), level.parse(value));
+    },
+    ["/users"],
+  );
 }
 
-export async function setStatusAction(formData: FormData): Promise<void> {
-  const user = await requireUser();
-  const status = formData.get("status") === "SUSPENDED" ? "SUSPENDED" : "ACTIVE";
-  await setUserStatus(prisma, user, String(formData.get("userId") ?? ""), status);
-  revalidatePath("/users");
+/** Super admin: clear someone's Accounting PIN (they choose a new one next time). */
+export async function resetPinAction(userId: string) {
+  return runAction(
+    "users",
+    async () => {
+      const user = await requireUser();
+      await resetPin(prisma, user, id.parse(userId));
+    },
+    ["/users"],
+  );
 }

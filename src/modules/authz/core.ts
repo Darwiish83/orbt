@@ -2,6 +2,7 @@ import type { PrismaClient, UserStatus } from "@prisma/client";
 import { AuthorizationError } from "@/lib/errors";
 import type { Permission } from "./permissions";
 import { SUPER_ADMIN_ROLE_KEY } from "./permissions";
+import { applyModuleAccess } from "./modules";
 
 /**
  * Pure authorization logic — no Next.js / Auth.js imports, so it is directly
@@ -32,17 +33,52 @@ export async function loadAuthzUser(db: PrismaClient, userId: string): Promise<A
     where: { id: userId },
     include: {
       roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } },
+      employee: { include: { pageAccess: true, scopes: true } },
     },
   });
   if (!user || user.status !== "ACTIVE") return null;
 
   const roleKeys: string[] = [];
-  const permissions = new Set<string>();
-  const scopes: AuthzScope[] = [];
+  let permissions = new Set<string>();
+  let scopes: AuthzScope[] = [];
   for (const ur of user.roles) {
     roleKeys.push(ur.role.key);
     scopes.push({ country: ur.country, businessYear: ur.businessYear });
     for (const rp of ur.role.permissions) permissions.add(rp.permission.key);
+  }
+  const isSuperAdmin = roleKeys.includes(SUPER_ADMIN_ROLE_KEY);
+
+  // Users & Team settings (spec §5), enforced here for every request.
+  const emp = user.employee;
+  if (emp && !isSuperAdmin) {
+    const now = Date.now();
+    const outsideWindow = (emp.accessFrom && now < emp.accessFrom.getTime()) || (emp.accessUntil && now > emp.accessUntil.getTime());
+    if (!emp.active || outsideWindow) {
+      permissions = new Set(["self:read"]);
+      scopes = [];
+    } else {
+      permissions = applyModuleAccess(permissions, emp.pageAccess);
+      // Special access → Accounting (the PIN screen is still required per session).
+      if (emp.accountingAccess) {
+        permissions.add("accounting:read");
+        permissions.add("accounting:write");
+      } else {
+        for (const p of ["accounting:read", "accounting:write", "accounting:manage"]) permissions.delete(p);
+      }
+      // Special access → Money Transfer: No access / Receiver / Sender (spec §5, §12).
+      for (const p of ["transfer:read", "transfer:write", "transfer:receive", "transfer:send"]) permissions.delete(p);
+      if (emp.transferRole !== "NONE") {
+        permissions.add("transfer:read");
+        permissions.add(emp.transferRole === "RECEIVE" ? "transfer:receive" : "transfer:send");
+      }
+      // Responsible countries narrow every role scope to those countries.
+      const countries = emp.scopes.map((s) => s.country);
+      if (countries.length) {
+        scopes = scopes.flatMap((s) =>
+          s.country === null ? countries.map((c) => ({ country: c, businessYear: s.businessYear })) : countries.includes(s.country) ? [s] : [],
+        );
+      }
+    }
   }
 
   return {
@@ -53,7 +89,7 @@ export async function loadAuthzUser(db: PrismaClient, userId: string): Promise<A
     customerId: user.customerId,
     sessionEpoch: user.sessionEpoch,
     mfaEnabled: user.mfaEnabled,
-    isSuperAdmin: roleKeys.includes(SUPER_ADMIN_ROLE_KEY),
+    isSuperAdmin,
     roleKeys,
     permissions,
     scopes,
