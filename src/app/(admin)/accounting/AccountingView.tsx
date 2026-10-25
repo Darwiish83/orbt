@@ -19,7 +19,7 @@ import type {
   profitAndExpenses,
 } from "@/modules/accounting/service";
 import { FinBox, ToastHost, useToast } from "@/components/admin/ui";
-import { closePeriodAction, lockAction, returnDebtAction } from "./actions";
+import { closePeriodAction, lockAction, reopenPeriodAction, returnDebtAction } from "./actions";
 import { CostsTab } from "./CostsTab";
 import { IncomeTab, OutDialog, type OutOptions } from "./IncomeTab";
 import { OpeningBalance } from "./OpeningBalance";
@@ -145,7 +145,17 @@ function DebtsTab({ debts, options, canWrite }: { debts: A<typeof listDebts>; op
   const [v, setV] = useState({ amount: "", bankId: options.banks[0]?.id ?? "", date: new Date().toISOString().slice(0, 10) });
   const [pending, start] = useTransition();
   const cols: DataColumn<A<typeof listDebts>["rows"][number]>[] = [
-    { key: "p", label: "Person / company", strong: true, render: (r) => r.person },
+    {
+      key: "p",
+      label: "Person / company",
+      strong: true,
+      render: (r) => (
+        <>
+          {r.person}
+          {r.note && <span style={{ display: "block", fontSize: 12, fontWeight: 400, color: "var(--text-muted)" }}>{r.note}</span>}
+        </>
+      ),
+    },
     { key: "d", label: "Date", render: (r) => (r.fromYear ? <Badge tone="neutral">{`${t("From")} ${r.fromYear}`}</Badge> : fdate(r.date)) },
     { key: "l", label: "Lent", align: "right", render: (r) => money(r.lent) },
     { key: "r", label: "Returned", align: "right", render: (r) => <span style={{ color: "var(--green-600)" }}>{money(r.returned)}</span> },
@@ -396,15 +406,19 @@ function OverviewTab({ o, canManage, year }: { o: A<typeof overview>; canManage:
   const t = useT();
   const toast = useToast();
   const router = useRouter();
-  const [ask, setAsk] = useState<string | null>(null);
+  const [ask, setAsk] = useState<{ period: string; reopen: boolean } | null>(null);
   const [pending, start] = useTransition();
   const LABEL: Record<string, string> = { H1: "January – June", H2: "July – December", YEAR: "Full year" };
   const range = (p: (typeof o.periods)[number]) => `${fdate(p.from)} – ${fdate(p.to)}`;
   const yearClosed = !!o.periods.find((p) => p.period === "YEAR")?.closedAt;
+  const check = o.yearCheck;
+  const blocked = !!check?.blockers.length;
   return (
     <FinBox title="Period closing" pad={0}>
       <div style={{ padding: "0 14px", fontSize: 13, color: "var(--text-muted)" }}>
-        {t("Closing a period locks everything dated in it. Closing the full year also opens the next year with this year's balance.")}
+        {o.canClose
+          ? t("January – June locks what is dated in it. The full year is closed when everything is paid out and only Orbit profit is left: then nothing of the year can change, whatever the date, and the next year opens with it.")
+          : t("Years before 2026 are opening balances; there is nothing to close.")}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(250px,1fr))", gap: 12, padding: "0 14px 14px" }}>
         {o.periods.map((p, i) => {
@@ -446,16 +460,52 @@ function OverviewTab({ o, canManage, year }: { o: A<typeof overview>; canManage:
                   </div>
                 ))}
               </div>
-              {isYear && (
+              {isYear && closed && (
                 <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#F0F4FA", color: "var(--navy-700)" }}>
-                  {closed ? `✓ ${t("Balance carried to")} ${year + 1}` : `→ ${t("Opens")} ${year + 1} ${t("with this year's balance, banks, parts and debts")}`}
+                  ✓ {t("Balance carried to")} {year + 1}
                 </div>
               )}
-              <div style={{ marginTop: "auto" }}>
+              {isYear && !closed && check && (
+                <div data-testid="year-check" style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, padding: "8px 10px", borderRadius: 8, background: blocked ? "#FFF6E5" : "#EAF7EF" }}>
+                  {blocked ? (
+                    <>
+                      <b style={{ color: "#B45309" }}>{t("Still to pay out before closing")}</b>
+                      {check.blockers.map((b) => (
+                        <div key={b.key}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
+                            <span>{t(b.label)}</span>
+                            {b.key !== "previous" && <b>{money(b.amount)}</b>}
+                          </div>
+                          {b.detail.length > 0 && <div style={{ color: "var(--text-muted)" }}>{b.detail.map((d) => `${d.code} · ${money(d.amount)}`).join(", ")}</div>}
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <b style={{ color: "var(--green-600)" }}>
+                      ✓ {t("Only Orbit profit is left")}: {money(check.orbitProfit)}
+                    </b>
+                  )}
+                  {check.customersOwe.count > 0 && (
+                    <div style={{ color: "var(--text-muted)" }}>
+                      {t("Customers still owe")} {money(check.customersOwe.amount)} ({check.customersOwe.count}) — {t("carried to")} {year + 1} {t("as debts")}
+                    </div>
+                  )}
+                </div>
+              )}
+              <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
                 {closed ? (
-                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{p.closedAt ? `${t("Closed")} ${fdate(p.closedAt)}` : t("Closed with the full year")}</div>
-                ) : canManage ? (
-                  <Button size="s" variant={isYear ? "primary" : "outline"} leadingIcon={<Icon name="Lock" size={14} />} onClick={() => setAsk(p.period)} data-testid={`close-${p.period}`}>
+                  <>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{p.closedAt ? `${t("Closed")} ${fdate(p.closedAt)}` : t("Closed with the full year")}</div>
+                    {p.closedAt && o.canReopen && (
+                      <Button size="s" variant="outline" leadingIcon={<Icon name="LockOpen" size={14} />} onClick={() => setAsk({ period: p.period, reopen: true })} data-testid={`reopen-${p.period}`}>
+                        {t("Reopen")}
+                      </Button>
+                    )}
+                  </>
+                ) : p.period === "H2" ? (
+                  o.canClose && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("Closes with the full year")}</div>
+                ) : canManage && o.canClose ? (
+                  <Button size="s" variant={isYear ? "primary" : "outline"} leadingIcon={<Icon name="Lock" size={14} />} disabled={isYear && blocked} onClick={() => setAsk({ period: p.period, reopen: false })} data-testid={`close-${p.period}`}>
                     {t("Close")} {t(LABEL[p.period]!)}
                   </Button>
                 ) : null}
@@ -467,7 +517,7 @@ function OverviewTab({ o, canManage, year }: { o: A<typeof overview>; canManage:
       {ask && (
         <Dialog
           open
-          title={`${t("Close period")} · ${t(LABEL[ask]!)} ${year}`}
+          title={`${t(ask.reopen ? "Reopen period" : "Close period")} · ${t(LABEL[ask.period]!)} ${year}`}
           onClose={() => setAsk(null)}
           footer={
             <>
@@ -478,28 +528,39 @@ function OverviewTab({ o, canManage, year }: { o: A<typeof overview>; canManage:
                 disabled={pending}
                 onClick={() =>
                   start(async () => {
-                    const r = await closePeriodAction(ask);
-                    toast(r.ok ? { tone: "success", title: "Period closed" } : { tone: "danger", title: r.error });
+                    const r = ask.reopen ? await reopenPeriodAction(ask.period) : await closePeriodAction(ask.period);
+                    toast(r.ok ? { tone: "success", title: ask.reopen ? "Period reopened" : "Period closed" } : { tone: "danger", title: r.error });
                     setAsk(null);
                     router.refresh();
                   })
                 }
               >
-                {t("Close period")}
+                {t(ask.reopen ? "Reopen period" : "Close period")}
               </Button>
             </>
           }
         >
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 14 }}>
-            <div>{t("After closing, nothing dated in this period can be changed in Finance or Accounting.")}</div>
-            <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: 13, color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: 4 }}>
-              <li>{t("No new or reversed payments, outs or debt returns dated in it.")}</li>
-              <li>{t("The cost sheets of shipments sent in it are locked.")}</li>
-              {ask !== "H2" && <li>{t("The opening balance of earlier years is locked.")}</li>}
-              <li>{t("A closed period cannot be opened again.")}</li>
-            </ul>
-            {ask === "YEAR" && <div style={{ fontSize: 13, padding: "8px 10px", borderRadius: 8, background: "#F0F4FA", color: "var(--navy-700)" }}>{t("The closing balance is carried into next year as its opening balance.")}</div>}
-          </div>
+          {ask.reopen ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 14 }}>
+              <div>{t("The period can be changed again until it is closed again.")}</div>
+              {ask.period === "YEAR" && <div style={{ fontSize: 13, color: "var(--text-muted)" }}>{t("What this year carried into next year is taken back; closing again carries it anew.")}</div>}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 14 }}>
+              <div>{t(ask.period === "YEAR" ? "After closing, nothing of this year can be changed, whatever the date." : "After closing, nothing dated in this period can be changed in Finance or Accounting.")}</div>
+              <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: 13, color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: 4 }}>
+                <li>{t(ask.period === "YEAR" ? "No new or changed shipments, invoices, payments, outs, debt returns or Money Receive of this year." : "No new or reversed payments, outs or debt returns dated in it.")}</li>
+                <li>{t(ask.period === "YEAR" ? "The year's cost sheets are locked." : "The cost sheets of shipments sent in it are locked.")}</li>
+                <li>{t("The opening balance of earlier years is locked.")}</li>
+                <li>{t("Only a Super Admin can reopen a closed period.")}</li>
+              </ul>
+              {ask.period === "YEAR" && (
+                <div style={{ fontSize: 13, padding: "8px 10px", borderRadius: 8, background: "#F0F4FA", color: "var(--navy-700)" }}>
+                  {t("Next year opens with this year's balance (Orbit profit), and customers who still owe are carried as debts.")}
+                </div>
+              )}
+            </div>
+          )}
         </Dialog>
       )}
     </FinBox>

@@ -8,8 +8,8 @@ import { verifyMfa } from "@/modules/auth/mfa";
 import { assertNotRateLimited, recordAttempt } from "@/modules/auth/rateLimit";
 
 /**
- * Two sign-in forms (ADR-016), one Credentials provider:
- *  - customer: Customer Reference + password
+ * One sign-in page (ADR-021), one Credentials provider:
+ *  - customer: Customer Reference + email ("Gmail") + password
  *  - staff:    Employee ID + email ("Gmail") + password (+ TOTP when MFA is on)
  * Rate limiting is per Reference / Employee ID.
  */
@@ -17,6 +17,7 @@ const credentialsSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("customer"),
     reference: z.string().trim().min(1).max(32),
+    email: z.string().trim().email().max(254),
     password: z.string().min(1).max(256),
   }),
   z.object({
@@ -44,7 +45,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         const user =
           c.kind === "customer"
-            ? await verifyCustomerLogin(prisma, c.reference, c.password)
+            ? await verifyCustomerLogin(prisma, c.reference, c.email, c.password)
             : await verifyStaffLogin(prisma, c.employeeId, c.email, c.password);
         await recordAttempt(prisma, { identifier, kind: "login", success: !!user });
         if (!user) return null;

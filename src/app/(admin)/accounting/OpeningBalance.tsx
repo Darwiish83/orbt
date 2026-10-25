@@ -37,8 +37,8 @@ const card: CSSProperties = { border: "1px solid var(--border-default)", borderR
 
 /**
  * Overview → Opening balance (owner 2026-10-24). For each earlier year: first
- * its balance, then the banks it is in, then what the money is — both must
- * equal the balance. Only what was typed is shown. Then the company balance:
+ * its balance, then the banks it is in (they must equal the balance). The
+ * money is Orbit profit (owner 2026-10-25). Then the company balance:
  * brought forward + this year = now.
  */
 export function OpeningBalance({ o, year, canManage }: { o: Opening; year: number; canManage: boolean }) {
@@ -48,7 +48,8 @@ export function OpeningBalance({ o, year, canManage }: { o: Opening; year: numbe
   const [editing, setEditing] = useState<number | null>(null);
   const [history, setHistory] = useState(false);
   const known = o.years.map((y) => y.fromYear);
-  const more = Array.from({ length: 15 }, (_, i) => year - 1 - i).filter((y) => !known.includes(y));
+  // Only years before the system are typed; later years are carried when closed.
+  const more = Array.from({ length: 15 }, (_, i) => year - 1 - i).filter((y) => y < o.systemStart && !known.includes(y));
   const current = o.years.find((y) => y.fromYear === fy) ?? null;
   const thisYear = String((cents(o.now.balance) - cents(o.now.opening)) / 100);
   return (
@@ -114,13 +115,13 @@ export function OpeningBalance({ o, year, canManage }: { o: Opening; year: numbe
       </div>
 
       {o.years.length === 0 && editing === null && (
-        <div style={{ padding: "4px 14px 8px", fontSize: 13, color: "var(--text-muted)" }}>{t("No earlier year yet. Use \"Add a year's balance\": first the year's balance, then the banks it is in, then what the money is.")}</div>
+        <div style={{ padding: "4px 14px 8px", fontSize: 13, color: "var(--text-muted)" }}>{t("No earlier year yet. Use \"Add a year's balance\": first the year's balance, then the banks it is in. It is added to Orbit profit.")}</div>
       )}
 
       {fy !== null && editing === fy ? (
         <YearForm o={o} fromYear={fy} y={current} onDone={() => setEditing(null)} />
       ) : (
-        current && <YearView y={current} year={year} editable={editable} onEdit={() => setEditing(current.fromYear)} />
+        current && <YearView y={current} year={year} editable={editable && !current.carried && current.fromYear < o.systemStart} onEdit={() => setEditing(current.fromYear)} />
       )}
 
 
@@ -144,7 +145,7 @@ function Sum({ label, v, strong }: { label: string; v: string; strong?: boolean 
   );
 }
 
-/** A saved year: its balance, then only the banks and parts that were typed. */
+/** A saved year: its balance (Orbit profit), then the banks that were typed. */
 function YearView({ y, year, editable, onEdit }: { y: Year; year: number; editable: boolean; onEdit: () => void }) {
   const t = useT();
   const toast = useToast();
@@ -181,6 +182,7 @@ function YearView({ y, year, editable, onEdit }: { y: Year; year: number; editab
               <div data-testid="opening-year-total" style={{ font: "800 26px var(--font-display)", color: Number(y.total) < 0 ? "var(--red-600)" : "var(--green-600)" }}>
                 {money(y.total)}
               </div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("Added to Orbit profit")}</div>
               {y.note && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{y.note}</div>}
             </div>
             {editable && (
@@ -196,11 +198,6 @@ function YearView({ y, year, editable, onEdit }: { y: Year; year: number; editab
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 12 }}>
             {list("Where it is (banks)", y.banks.map((b) => ({ key: b.bankId ?? "none", label: b.bank ? t(b.bank) : t("Not in a bank"), amount: b.amount })), "opening-banks")}
-            {list(
-              "What the money is",
-              y.parts.map((p) => ({ key: p.source, label: t(OPENING_LABEL[p.source]!), amount: p.amount, sub: Number(p.paid) ? `${t("Paid in")} ${year}: −${money(p.paid)} · ${t("Left")}: ${money(p.left)}` : undefined })),
-              "opening-parts",
-            )}
           </div>
           {y.paidAfter.length > 0 && (
             <div style={card} data-testid="opening-paid-after">
@@ -236,6 +233,14 @@ function YearView({ y, year, editable, onEdit }: { y: Year; year: number; editab
                 <span>{t("Total paid")}</span>
                 <span style={{ color: "var(--red-600)" }}>−{money(y.paidTotal)}</span>
               </div>
+              {y.left !== null && (
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700 }} data-testid="opening-left">
+                  <span>
+                    {t("Left of")} {y.fromYear}
+                  </span>
+                  <span>{money(y.left)}</span>
+                </div>
+              )}
             </div>
           )}
         </>
@@ -267,14 +272,14 @@ function YearView({ y, year, editable, onEdit }: { y: Year; year: number; editab
             </>
           }
         >
-          <div style={{ fontSize: 14 }}>{t("The year's balance, banks and parts stop counting. They stay in the History.")}</div>
+          <div style={{ fontSize: 14 }}>{t("The year's balance and banks stop counting. They stay in the History.")}</div>
         </Dialog>
       )}
     </div>
   );
 }
 
-/** 1. the year's balance → 2. which banks → 3. what the money is. */
+/** 1. the year's balance → 2. which banks. The money is Orbit profit. */
 function YearForm({ o, fromYear, y, onDone }: { o: Opening; fromYear: number; y: Year | null; onDone: () => void }) {
   const t = useT();
   const toast = useToast();
@@ -282,13 +287,12 @@ function YearForm({ o, fromYear, y, onDone }: { o: Opening; fromYear: number; y:
   const [pending, start] = useTransition();
   const [total, setTotal] = useState(y?.total ?? "");
   const [banks, setBanks] = useState<Record<string, string>>(Object.fromEntries(o.banks.map((b) => [b.id, y?.banks.find((x) => x.bankId === b.id)?.amount ?? ""])));
-  const [parts, setParts] = useState<Record<string, string>>(Object.fromEntries(o.parts.map((p) => [p, y?.parts.find((x) => x.source === p)?.amount ?? ""])));
   const [note, setNote] = useState(y?.note ?? "");
   const T = cents(total);
   const hasTotal = total.trim() !== "" && Number.isFinite(T) && T !== 0;
   const sumOf = (r: Record<string, string>) => Object.values(r).reduce((a, v) => a + (v.trim() ? cents(v) : 0), 0);
   const left = (r: Record<string, string>) => T - sumOf(r);
-  const ok = hasTotal && left(banks) === 0 && left(parts) === 0 && Number.isFinite(sumOf(banks)) && Number.isFinite(sumOf(parts));
+  const ok = hasTotal && left(banks) === 0 && Number.isFinite(sumOf(banks));
   const num = (v: string) => v.replace(/[^\d.-]/g, "");
   const step = (n: number, title: string, on: boolean) => (
     <div style={{ display: "flex", alignItems: "center", gap: 8, font: "700 14px var(--font-display)", color: on ? "var(--text-strong)" : "var(--text-muted)" }}>
@@ -328,9 +332,7 @@ function YearForm({ o, fromYear, y, onDone }: { o: Opening; fromYear: number; y:
       {step(2, t("Which banks is it in?"), hasTotal)}
       {grid(banks, (k, v) => setBanks((x) => ({ ...x, [k]: v })), o.banks.map((b) => ({ key: b.id, label: t(b.name) })), "opening-form-banks")}
       {hasTotal && remain(banks)}
-      {step(3, t("What is the money?"), hasTotal)}
-      {grid(parts, (k, v) => setParts((x) => ({ ...x, [k]: v })), o.parts.map((p) => ({ key: p, label: t(OPENING_LABEL[p]!) })), "opening-form-parts")}
-      {hasTotal && remain(parts)}
+      <div style={{ fontSize: 13, color: "var(--text-muted)" }}>{t("The year's balance is added to Orbit profit.")}</div>
       <Input label={t("Note")} value={note} onChange={(e) => setNote(e.target.value)} />
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
         <Button
@@ -342,7 +344,6 @@ function YearForm({ o, fromYear, y, onDone }: { o: Opening; fromYear: number; y:
                 fromYear,
                 total,
                 banks: Object.entries(banks).filter(([, v]) => v.trim()).map(([bankId, amount]) => ({ bankId, amount })),
-                parts: Object.entries(parts).filter(([, v]) => v.trim()).map(([source, amount]) => ({ source: source as never, amount })),
                 note,
               });
               if (!r.ok) return toast({ tone: "danger", title: r.error });
@@ -476,7 +477,7 @@ function History({ o, editable }: { o: Opening; editable: boolean }) {
               <td style={{ ...td, textAlign: "start", whiteSpace: "normal", color: "var(--text-muted)" }}>{r.note ?? "—"}</td>
               <td style={{ ...amt(r.amount), textDecoration: r.reversed ? "line-through" : undefined }}>{money(r.amount)}</td>
               <td style={td}>
-                {editable && r.kind === "DEBT" && !r.reversed && (
+                {editable && r.kind === "DEBT" && !r.reversed && !r.carried && (
                   <Button
                     size="s"
                     variant="ghost"

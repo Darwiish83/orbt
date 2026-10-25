@@ -276,6 +276,20 @@ describe("Announcements, documents and reports", () => {
     expect(list.items[0]).toMatchObject({ reference: "PL-1" });
     const india = await staff(["documents:write"], "India");
     await expect(uploadAdminDocument(prisma, india, { target: "shipment", shipmentId: w1.id, kind: "CARGO_DOC", file: { buffer: pdf, name: "x.pdf", type: "application/pdf" } })).rejects.toThrow(/scope/);
+
+    // A shipment's papers: air = origin or transit AWB; a container has one document.
+    const ship = (part?: "ORIGIN_AWB" | "TRANSIT_AWB" | "CONTAINER") => uploadAdminDocument(prisma, admin, { target: "shipment", shipmentId: w1.id, kind: "OTHER", part, file: { buffer: pdf, name: "awb.pdf", type: "application/pdf" } });
+    const mode = (await prisma.shipment.findUniqueOrThrow({ where: { id: w1.id } })).mode;
+    if (mode === "AIR") {
+      await expect(ship()).rejects.toThrow(/origin AWB or transit AWB/);
+      await expect(ship("CONTAINER")).rejects.toThrow(/origin AWB or transit AWB/);
+      await ship("TRANSIT_AWB");
+      const row = (await listAdminDocuments(prisma, admin, { year: 2026, country: "Turkey" })).items.find((d) => d.shipment)!;
+      expect([row.part, row.kind, row.customer]).toEqual(["TRANSIT_AWB", "CARGO_DOC", null]);
+    } else {
+      await expect(ship("ORIGIN_AWB")).rejects.toThrow(/container document/);
+      await ship("CONTAINER");
+    }
   });
 
   it("reports never show another country's money (fixed leak) and company-wide covers all allowed countries", async () => {

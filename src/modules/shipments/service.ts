@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient, Shipment, ShipmentMode, ShipmentStatus } from "@prisma/client";
+import { assertYearOpen } from "@/modules/accounting/periods";
 import { AuthorizationError, ValidationError } from "@/lib/errors";
 import { buildPage, normalizePage, type Page, type PageParams } from "@/lib/pagination";
 import { logAudit } from "@/modules/audit/log";
@@ -41,6 +42,7 @@ export async function createShipment(
   const originCountry = await requireOriginCountry(db, input.originCountry);
   await requireBusinessYear(db, input.businessYear);
   requireScope(actor, { country: originCountry, businessYear: input.businessYear });
+  await assertYearOpen(db, originCountry, input.businessYear);
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = await nextShipmentCode(db, input.mode, originCountry, input.businessYear);
@@ -267,6 +269,7 @@ export async function addShipmentLine(db: PrismaClient, actor: AuthzUser, shipme
   const shipment = await db.shipment.findUnique({ where: { id: shipmentId } });
   if (!shipment) throw new ValidationError("Shipment not found");
   requireScope(actor, { country: shipment.originCountry, businessYear: shipment.businessYear });
+  await assertYearOpen(db, shipment.originCountry, shipment.businessYear);
   if (shipment.mode === "AIR" && input.volumeCbm != null) throw new ValidationError("Air lines are measured in KG");
   if (shipment.mode === "SEA" && (input.chargeableWeightKg != null || input.mixKg != null)) {
     throw new ValidationError("Sea lines are measured in CBM");

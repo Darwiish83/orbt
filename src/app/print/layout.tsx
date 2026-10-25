@@ -8,7 +8,7 @@ import { getSessionUser } from "@/modules/authz/session";
  */
 export default async function PrintLayout({ children }: { children: React.ReactNode }) {
   const user = await getSessionUser();
-  if (!user) redirect("/admin/login");
+  if (!user) redirect("/login");
   if (user.customerId) redirect("/account");
   return <div className="print-page">{children}</div>;
 }

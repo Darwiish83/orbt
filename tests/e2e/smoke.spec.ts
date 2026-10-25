@@ -11,12 +11,12 @@ import {
 } from "./constants";
 
 async function staffLogin(page: Page) {
-  await page.goto("/admin/login");
-  await page.getByLabel("Employee ID").fill(E2E_EMPLOYEE_ID);
+  await page.goto("/login");
+  await page.getByLabel("Employee ID or Customer Reference").fill(E2E_EMPLOYEE_ID);
   await page.getByLabel("Gmail").fill(E2E_EMAIL);
   await page.getByLabel("Password").fill(E2E_PASSWORD);
   await page.getByLabel("Authenticator code").fill(authenticator.generate(E2E_MFA_SECRET));
-  await page.getByRole("button", { name: /continue/i }).click();
+  await page.getByRole("button", { name: /log in/i }).click();
   // Generous timeout: a dev server compiles /dashboard on first hit.
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
 }
@@ -27,10 +27,11 @@ test("landing page shows the brand hero", async ({ page }) => {
   await expect(page.getByRole("link", { name: /customer & admin login/i })).toBeVisible();
 });
 
-test("unauthenticated access redirects staff areas to the admin login and the portal to the customer login", async ({ page }) => {
+test("unauthenticated access to staff areas and the portal goes to the one sign-in page", async ({ page }) => {
   await page.goto("/dashboard");
-  await expect(page).toHaveURL(/\/admin\/login/);
-  await expect(page.getByRole("heading", { name: /admin login/i })).toBeVisible();
+  await expect(page).toHaveURL(/\/login$/);
+  await page.goto("/admin/login");
+  await expect(page).toHaveURL(/\/login$/);
   await page.goto("/account");
   await expect(page).toHaveURL(/\/login$/);
   await expect(page.getByRole("heading", { name: /welcome to orbit/i })).toBeVisible();
@@ -62,19 +63,20 @@ test("public tracking shows a not-found message for an unknown number", async ({
 
 test("customer login refuses a wrong password with a generic error", async ({ page }) => {
   await page.goto("/login");
-  await page.getByLabel("Customer Reference").fill(E2E_CUSTOMER_REF);
+  await page.getByLabel("Employee ID or Customer Reference").fill(E2E_CUSTOMER_REF);
+  await page.getByLabel("Gmail").fill(E2E_CUSTOMER_EMAIL);
   await page.getByLabel("Password").fill("wrong-password");
   await page.getByRole("button", { name: /log in/i }).click();
-  await expect(page.getByText(/customer reference or password is incorrect/i)).toBeVisible();
+  await expect(page.getByText(/id, email or password is incorrect/i)).toBeVisible();
   await expect(page).toHaveURL(/\/login/);
 });
 
 test("customer first-login flow never reveals whether the details matched", async ({ page }) => {
   await page.goto("/login");
   await page.getByRole("button", { name: /first login or forgot password/i }).click();
-  await page.getByLabel("Customer Reference").fill("OR-9999");
+  await page.getByLabel("Employee ID or Customer Reference").fill("OR-9999");
+  await page.getByLabel("Gmail").fill("nobody@example.com");
   await page.getByLabel("Phone Number").fill("61 000 0000");
-  await page.getByLabel("Email").fill("nobody@example.com");
   await page.getByRole("button", { name: /send otp/i }).click();
   // Same screen as a real match (no email is sent for these details).
   await expect(page.getByText(/if the details match our records/i)).toBeVisible();
@@ -88,27 +90,23 @@ test("new-customer form requires every field", async ({ page }) => {
   await expect(page.locator("main").getByRole("alert")).toContainText(/fill in all required fields/i);
 });
 
-test("a customer account cannot sign in through the admin login", async ({ page }) => {
-  await page.goto("/admin/login");
-  await page.getByLabel("Employee ID").fill("EMP-001");
+test("a customer's Gmail and password cannot sign in with an Employee ID", async ({ page }) => {
+  await page.goto("/login");
+  await page.getByLabel("Employee ID or Customer Reference").fill("EMP-001");
   await page.getByLabel("Gmail").fill(E2E_CUSTOMER_EMAIL);
   await page.getByLabel("Password").fill(E2E_CUSTOMER_PASSWORD);
-  await page.getByRole("button", { name: /continue/i }).click();
-  await expect(page.locator("main").getByRole("alert")).toContainText(/employee id, email or password is incorrect/i);
-  await expect(page).toHaveURL(/\/admin\/login/);
+  await page.getByRole("button", { name: /log in/i }).click();
+  await expect(page.locator("main").getByText(/id, email or password is incorrect/i)).toBeVisible();
+  await expect(page).toHaveURL(/\/login/);
 });
 
-test("admin Create Password walks Verify → Gmail → code without revealing a match", async ({ page }) => {
-  await page.goto("/admin/login");
-  await page.getByRole("radio", { name: /create password/i }).click();
-  await page.getByLabel("Employee ID").fill("bad");
-  await page.getByRole("button", { name: /continue/i }).click();
-  await expect(page.locator("main").getByRole("alert")).toContainText(/EMP-000/);
-  await page.getByLabel("Employee ID").fill("EMP-9999");
-  await page.getByRole("button", { name: /continue/i }).click();
+test("staff first login asks only ID + Gmail and never reveals a match", async ({ page }) => {
+  await page.goto("/login");
+  await page.getByRole("button", { name: /first login or forgot password/i }).click();
+  await page.getByLabel("Employee ID or Customer Reference").fill("EMP-9999");
+  await expect(page.getByLabel("Phone Number")).toHaveCount(0);
   await page.getByLabel("Gmail").fill("nobody@example.com");
-  await page.getByRole("button", { name: /send code/i }).click();
-  await expect(page.getByLabel("Gmail Verification")).toBeVisible();
+  await page.getByRole("button", { name: /send otp/i }).click();
   await expect(page.getByText(/if the details match our records/i)).toBeVisible();
 });
 
@@ -123,11 +121,11 @@ test.describe("authenticated session", () => {
     await expect(page.getByRole("link", { name: "Xamuulada" })).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("lang", "so");
 
-    // Logout (stable test id — the visible label is localized) returns staff to the admin login.
+    // Logout (stable test id — the visible label is localized) returns staff to the sign-in page.
     await page.getByTestId("logout-button").click();
-    await expect(page).toHaveURL(/\/admin\/login/);
+    await expect(page).toHaveURL(/\/login$/);
     await page.goto("/dashboard");
-    await expect(page).toHaveURL(/\/admin\/login/);
+    await expect(page).toHaveURL(/\/login$/);
   });
 
   test("creates a customer through the authorized admin form", async ({ page }) => {
@@ -145,7 +143,8 @@ test.describe("authenticated session", () => {
 test.describe("customer portal", () => {
   test("customer lands on the portal and can upload + download a document", async ({ page }) => {
     await page.goto("/login");
-    await page.getByLabel("Customer Reference").fill(E2E_CUSTOMER_REF);
+    await page.getByLabel("Employee ID or Customer Reference").fill(E2E_CUSTOMER_REF);
+    await page.getByLabel("Gmail").fill(E2E_CUSTOMER_EMAIL);
     await page.getByLabel("Password").fill(E2E_CUSTOMER_PASSWORD);
     await page.getByRole("button", { name: /log in/i }).click();
 

@@ -3,7 +3,7 @@ import { AuthorizationError, ValidationError } from "@/lib/errors";
 import { logAudit } from "@/modules/audit/log";
 import { displayShipmentCode } from "@/modules/authz/adminScope";
 import { requirePermission, requireScope, type AuthzUser } from "@/modules/authz/core";
-import { assertOpen } from "@/modules/accounting/periods";
+import { assertOpen, assertYearOpen } from "@/modules/accounting/periods";
 import { buildSpecInvoice, lineMeasure, type SpecInvoiceInput } from "./charges";
 import { createInvoice, recomputeInvoice } from "./invoices";
 import { dec, round2, sum } from "./money";
@@ -262,6 +262,7 @@ export async function createShipmentInvoice(
   input: { shipmentId: string; customerId: string } & InvoiceFormInput,
 ): Promise<Invoice> {
   const shipment = await scopedShipment(db, actor, input.shipmentId, "invoices:write");
+  await assertYearOpen(db, shipment.originCountry, shipment.businessYear);
   await assertOpen(db, shipment.originCountry, new Date());
   const actual = await actualMeasureOf(db, shipment, input.customerId);
   const existing = await db.invoice.findFirst({
@@ -318,6 +319,7 @@ export async function updateShipmentInvoice(
     await tx.$queryRaw`SELECT id FROM "Invoice" WHERE id = ${invoiceId} FOR UPDATE`;
     const inv = await scopedInvoice(tx, actor, invoiceId, "invoices:write");
     if (inv.status === "VOID") throw new ValidationError("A deleted invoice cannot be edited");
+    await assertYearOpen(tx, inv.shipment.originCountry, inv.shipment.businessYear);
     await assertOpen(tx, inv.shipment.originCountry, inv.issuedAt ?? inv.createdAt);
 
     const actual = await actualMeasureOf(tx, inv.shipment, inv.customerId);
@@ -388,6 +390,7 @@ export async function deleteShipmentInvoice(db: PrismaClient, actor: AuthzUser, 
     await tx.$queryRaw`SELECT id FROM "Invoice" WHERE id = ${invoiceId} FOR UPDATE`;
     const inv = await scopedInvoice(tx, actor, invoiceId, "invoices:manage");
     if (inv.status === "VOID") return inv;
+    await assertYearOpen(tx, inv.shipment.originCountry, inv.shipment.businessYear);
     await assertOpen(tx, inv.shipment.originCountry, inv.issuedAt ?? inv.createdAt);
     if (!inv.amountAllocated.isZero()) {
       throw new ValidationError("Cannot delete an invoice with payments; delete the payments first");

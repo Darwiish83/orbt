@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "@/db/client";
 import { requireUser } from "@/modules/authz/session";
 import { addReceive, deleteReceive, deleteSend, editReceive, recordSend, setHanded, startNewMonth } from "@/modules/transfer/money";
+import { createTransferReceipt, voidTransferReceipt } from "@/modules/transfer/receipts";
 import { getAdminScope } from "../scope";
 import { runAction } from "../runAction";
 
@@ -74,6 +75,37 @@ export async function deleteAction(rowId: string, part: "receive" | "send") {
       else await deleteReceive(prisma, user, id.parse(rowId));
     },
     paths,
+  );
+}
+
+const receipt = z.object({
+  receivedFrom: z.string().max(120),
+  reference: z.string().max(20).optional(),
+  amount: z.string().max(20),
+  fee: z.string().max(20).optional(),
+  description: z.string().max(160),
+});
+export type TransferReceiptValues = z.input<typeof receipt>;
+
+export async function createReceiptAction(rowId: string, values: TransferReceiptValues) {
+  return runAction(
+    "transfer",
+    async () => {
+      const user = await requireUser();
+      return createTransferReceipt(prisma, user, id.parse(rowId), receipt.parse(values));
+    },
+    [...paths, "/account/documents"],
+  );
+}
+
+export async function voidReceiptAction(receiptId: string) {
+  return runAction(
+    "transfer",
+    async () => {
+      const user = await requireUser();
+      await voidTransferReceipt(prisma, user, id.parse(receiptId));
+    },
+    [...paths, "/account/documents"],
   );
 }
 

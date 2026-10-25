@@ -60,8 +60,8 @@ export default auth((req) => {
 
   const response =
     isProtected && !isLoggedIn
-      ? // Customers sign in at /login; every other protected area is staff-only.
-        NextResponse.redirect(new URL(nextUrl.pathname.startsWith("/account") ? "/login" : "/admin/login", nextUrl.origin))
+      ? // Staff and customers sign in on the same page (ADR-021).
+        NextResponse.redirect(new URL("/login", nextUrl.origin))
       : NextResponse.next({ request: { headers: requestHeaders } });
 
   response.headers.set("Content-Security-Policy", csp);

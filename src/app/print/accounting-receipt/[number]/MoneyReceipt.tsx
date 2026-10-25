@@ -4,7 +4,7 @@
 import type { ReactNode } from "react";
 import { useT } from "@/i18n/I18nProvider";
 import type { listReceipts } from "@/modules/accounting/service";
-import type { PaperCompany } from "@/ui/kit";
+import { StampAndSign, type PaperCompany } from "@/ui/kit";
 import { fdate, money } from "@/ui/format";
 
 type R = Awaited<ReturnType<typeof listReceipts>>[number];
@@ -43,14 +43,15 @@ export function MoneyReceipt({ r, company }: { r: R; company: PaperCompany }) {
       <div>
         {row("Type", t(r.kindLabel))}
         {row(out ? "Sent to" : "Received from", r.party)}
+        {out && r.via && row("Sent via", r.via)}
         {row("Date", fdate(r.date))}
         {row(out ? "Paid from" : "Bank", r.bank ? t(r.bank) : "—")}
         {r.note && row("Note", r.note)}
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 18, fontSize: 12, color: "var(--text-muted)" }}>
-        <span>{t("Signature")}: ____________</span>
-        <span>{t("Thank you for choosing Orbit Cargo")}</span>
+      <div style={{ marginTop: 8 }}>
+        <StampAndSign label={t("Cashier Signature")} />
       </div>
+      <div style={{ textAlign: "center", fontSize: 12, color: "var(--text-muted)" }}>{t("Thank you for choosing Orbit Cargo")}</div>
     </div>
   );
 }

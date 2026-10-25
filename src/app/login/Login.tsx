@@ -1,16 +1,15 @@
 "use client";
 
 /* eslint-disable @next/next/no-img-element -- static brand logo */
-import Link from "next/link";
 import { useActionState, useState, useTransition, type ReactNode } from "react";
 import { useT } from "@/i18n/I18nProvider";
 import { LangToggle } from "@/i18n/LangToggle";
 import { Overline, Seg } from "@/ui/kit";
 import { Button, Card, Icon, Input } from "@/ui/primitives";
 import {
-  customerLoginAction,
-  customerSetPasswordAction,
+  loginAction,
   requestAccessAction,
+  setPasswordAction,
   startSignupAction,
   verifyAccessAction,
   verifySignupAction,
@@ -86,13 +85,20 @@ function OtpBoxes({ value, onChange, label }: { value: string; onChange: (v: str
   );
 }
 
+/** Employee IDs start with EMP-; anything else is a Customer Reference. */
+const isStaffId = (id: string) => /^\s*EMP-/i.test(id);
+
 /**
- * Customer sign-in (spec A1, ADR-016), matching ui_kits/customer-app/Login.jsx:
- * Existing Customer → Reference + Password, or first login / forgot →
- * Reference + Phone + Email → OTP → create password. New Customer → details →
- * OTP → account + Reference (in-app notification) → create password.
+ * One sign-in page for staff and customers (spec A1/B1, ADR-016, ADR-021),
+ * in the design of ui_kits/customer-app/Login.jsx.
+ * Sign in → ID (Employee ID or Customer Reference) + Gmail + Password (+ the
+ * authenticator code for staff with two-factor). The server sends staff to the
+ * admin and customers to their account. First login / forgot → ID + Gmail
+ * (+ phone for customers) → OTP → create password. New Customer (customers
+ * only) → details → OTP → account + Reference (in-app notification) → create
+ * password.
  */
-export function CustomerLogin() {
+export function Login() {
   const t = useT();
   const [mode, setMode] = useState<Mode>("existing");
   const [access, setAccess] = useState(false); // first login / forgot password
@@ -107,8 +113,10 @@ export function CustomerLogin() {
   const [pw2, setPw2] = useState("");
   const [nc, setNcS] = useState(blankSignup);
   const [err, setErr] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, start] = useTransition();
-  const [loginState, loginAction, loginPending] = useActionState<ActionResult | null, FormData>(customerLoginAction, null);
+  const [loginState, signInAction, loginPending] = useActionState<ActionResult | null, FormData>(loginAction, null);
+  const staff = isStaffId(ref);
 
   const setNc = (k: keyof typeof blankSignup, v: string) => setNcS((o) => ({ ...o, [k]: v }));
   const run = <R extends ActionResult>(p: () => Promise<R>, then: (r: R & { ok: true }) => void) =>
@@ -120,7 +128,7 @@ export function CustomerLogin() {
     });
 
   const sendAccess = () =>
-    run(() => requestAccessAction({ reference: ref, phone, email }), () => {
+    run(() => requestAccessAction({ id: ref, phone, email }), () => {
       setOtp("");
       setStep("otp");
     });
@@ -139,14 +147,22 @@ export function CustomerLogin() {
           setNewRef(r.reference);
           setStep("setpw");
         })
-      : run(() => verifyAccessAction({ email, code: otp }), (r) => {
+      : run(() => verifyAccessAction({ id: ref, email, code: otp }), (r) => {
           setToken(r.token);
           setStep("setpw");
         });
   const savePw = () => {
     if (pw.length < 8) return setErr(t("Password must be at least 8 characters"));
     if (pw !== pw2) return setErr(t("Passwords do not match"));
-    run(() => customerSetPasswordAction({ token, password: pw, confirm: pw2 }), () => undefined);
+    run(() => setPasswordAction({ token, password: pw, confirm: pw2 }), (r) => {
+      if (!r.signInRequired) return;
+      // Two-factor staff: back to Sign in to enter the authenticator code.
+      setAccess(false);
+      setStep("form");
+      setPw("");
+      setPw2("");
+      setNotice(t("Password created. Sign in with your authenticator code."));
+    });
   };
   const backToForm = () => {
     setStep("form");
@@ -163,7 +179,7 @@ export function CustomerLogin() {
   return (
     <div className="auth-cust">
       <aside className="auth-cust-aside">
-        <Overline color="var(--orange-400)">Orbit Cargo ERP • Customer App</Overline>
+        <Overline color="var(--orange-400)">Orbit Cargo ERP</Overline>
         <div
           style={{
             fontFamily: "var(--font-display)",
@@ -233,25 +249,41 @@ export function CustomerLogin() {
                   onChange={(m) => {
                     setMode(m as Mode);
                     setErr("");
+                    setNotice("");
                   }}
                   options={[
-                    ["existing", "Existing Customer"],
+                    ["existing", "Sign in"],
                     ["new", "New Customer"],
                   ]}
                 />
                 {mode === "existing" && !access && (
-                  <form action={loginAction} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  <form action={signInAction} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    {notice && (
+                      <div role="status" style={{ fontSize: 13, color: "var(--status-success)", fontWeight: 600 }}>
+                        {notice}
+                      </div>
+                    )}
                     <Input
-                      name="reference"
-                      label={t("Customer Reference")}
+                      name="id"
+                      label={t("Employee ID or Customer Reference")}
                       value={ref}
                       onChange={(e) => setRef(e.target.value)}
-                      placeholder="OR-0000"
+                      placeholder="EMP-000 / OR-0000"
                       autoComplete="username"
                       autoCapitalize="characters"
                       required
                       leadingIcon={<Icon name="IdCard" size={16} />}
                       inputStyle={{ fontFamily: "var(--font-mono)", fontSize: 14, textTransform: "uppercase" }}
+                    />
+                    <Input
+                      name="email"
+                      label={t("Gmail")}
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      autoComplete="email"
+                      required
+                      leadingIcon={<Icon name="Mail" size={16} />}
                     />
                     <Input
                       name="password"
@@ -260,8 +292,20 @@ export function CustomerLogin() {
                       autoComplete="current-password"
                       required
                       leadingIcon={<Icon name="Lock" size={16} />}
-                      error={loginState && !loginState.ok ? t(loginState.error) : undefined}
+                      error={loginState && !loginState.ok && !staff ? t(loginState.error) : undefined}
                     />
+                    {staff && (
+                      <Input
+                        name="code"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        label={t("Authenticator code")}
+                        hint={t("Only if two-factor is enabled on your account")}
+                        leadingIcon={<Icon name="ShieldCheck" size={16} />}
+                        inputStyle={{ fontFamily: "var(--font-mono)", letterSpacing: "0.2em" }}
+                        error={loginState && !loginState.ok ? t(loginState.error) : undefined}
+                      />
+                    )}
                     <Button type="submit" fullWidth size="l" disabled={loginPending} trailingIcon={<Icon name="ArrowRight" size={16} />}>
                       {t("Log in")}
                     </Button>
@@ -280,22 +324,22 @@ export function CustomerLogin() {
                 {mode === "existing" && access && (
                   <>
                     <Input
-                      label={t("Customer Reference")}
+                      label={t("Employee ID or Customer Reference")}
                       value={ref}
                       onChange={(e) => setRef(e.target.value)}
-                      placeholder="OR-0000"
+                      placeholder="EMP-000 / OR-0000"
                       leadingIcon={<Icon name="IdCard" size={16} />}
                       inputStyle={{ fontFamily: "var(--font-mono)", fontSize: 14, textTransform: "uppercase" }}
                     />
-                    <Input label={t("Phone Number")} value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" leadingIcon={phoneLead()} />
                     <Input
-                      label={t("Email")}
+                      label={t("Gmail")}
                       type="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       leadingIcon={<Icon name="Mail" size={16} />}
                       hint={t("Your OTP code will be sent to this email")}
                     />
+                    {!staff && <Input label={t("Phone Number")} value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" leadingIcon={phoneLead()} />}
                     {err && <ErrorBox>{err}</ErrorBox>}
                     <Button fullWidth size="l" onClick={sendAccess} disabled={busy} trailingIcon={<Icon name="ArrowRight" size={16} />}>
                       {t("Send OTP")}
@@ -392,10 +436,15 @@ export function CustomerLogin() {
                   </span>
                   <div>
                     <div style={{ font: "700 17px var(--font-display)", color: "var(--text-strong)" }}>{t(newRef ? "Create your password" : "Set a new password")}</div>
-                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("Next time, log in with your Customer Reference and password.")}</div>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("Next time, sign in with your ID, Gmail and password.")}</div>
                   </div>
                 </div>
-                <Input label={t("Customer Reference")} value={(newRef || ref).toUpperCase()} disabled inputStyle={{ fontFamily: "var(--font-mono)" }} />
+                <Input
+                  label={t(staff && !newRef ? "Employee ID" : "Customer Reference")}
+                  value={(newRef || ref).trim().toUpperCase()}
+                  disabled
+                  inputStyle={{ fontFamily: "var(--font-mono)" }}
+                />
                 <Input
                   label={t("Password")}
                   type="password"
@@ -432,11 +481,7 @@ export function CustomerLogin() {
               </div>
             ))}
           </div>
-          <div style={{ textAlign: "center", fontSize: 13, margin: "0 0 28px" }}>
-            <Link href="/admin/login" style={{ color: "var(--navy-700)", fontWeight: 600 }}>
-              {t("Staff? Admin login")}
-            </Link>
-          </div>
+          <div style={{ height: 12 }} />
         </div>
       </main>
     </div>

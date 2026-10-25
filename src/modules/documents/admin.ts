@@ -1,4 +1,4 @@
-import type { DocumentKind, Prisma, PrismaClient } from "@prisma/client";
+import type { DocumentKind, Prisma, PrismaClient, ShipmentDocPart } from "@prisma/client";
 import { ValidationError } from "@/lib/errors";
 import { displayShipmentCode } from "@/modules/authz/adminScope";
 import { requirePermission, requireScope, type AuthzUser } from "@/modules/authz/core";
@@ -69,6 +69,7 @@ export async function listAdminDocuments(db: PrismaClient, actor: AuthzUser, f: 
       reference: d.reference,
       filename: d.filename ?? "document",
       kind: d.kind,
+      part: d.shipmentPart,
       size: d.size,
       contentType: d.contentType,
       customer: d.customer ? `${d.customer.ref} — ${d.customer.name}` : null,
@@ -85,8 +86,13 @@ export interface AdminUploadInput {
   reference?: string;
   filename?: string;
   kind: DocumentKind;
+  /** "Upload Shipment": which paper it is — air: origin or transit AWB; container: one document. */
+  part?: ShipmentDocPart;
   file: { buffer: Buffer; name: string; type: string };
 }
+
+/** The papers a shipment has, by mode (owner 2026-10-25). */
+export const SHIPMENT_PARTS: Record<"AIR" | "SEA", ShipmentDocPart[]> = { AIR: ["ORIGIN_AWB", "TRANSIT_AWB"], SEA: ["CONTAINER"] };
 
 export async function uploadAdminDocument(db: PrismaClient, actor: AuthzUser, input: AdminUploadInput) {
   requirePermission(actor, "documents:write");
@@ -98,17 +104,19 @@ export async function uploadAdminDocument(db: PrismaClient, actor: AuthzUser, in
     const sh = await db.shipment.findUnique({ where: { id: input.shipmentId } });
     if (!sh) throw new ValidationError("Shipment not found");
     requireScope(actor, { country: sh.originCountry, businessYear: sh.businessYear });
+    if (!input.part || !SHIPMENT_PARTS[sh.mode === "AIR" ? "AIR" : "SEA"].includes(input.part)) throw new ValidationError(sh.mode === "AIR" ? "Choose origin AWB or transit AWB" : "Choose the container document");
   }
   const name = input.filename?.trim() || input.file.name;
   const doc = await uploadDocument(db, actor, {
     buffer: input.file.buffer,
     filename: name,
     declaredType: input.file.type,
-    kind: input.kind,
+    kind: input.target === "shipment" ? "CARGO_DOC" : input.kind,
     customerId: input.target === "customer" ? input.customerId : undefined,
     shipmentId: input.shipmentId || undefined,
   });
   const reference = input.reference?.trim().slice(0, 80) || null;
-  if (reference) await db.document.update({ where: { id: doc.id }, data: { reference } });
+  const part = input.target === "shipment" ? input.part! : null;
+  if (reference || part) await db.document.update({ where: { id: doc.id }, data: { reference, shipmentPart: part } });
   return doc;
 }

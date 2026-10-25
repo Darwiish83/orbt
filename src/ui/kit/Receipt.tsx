@@ -7,6 +7,7 @@ import { useT } from "@/i18n/I18nProvider";
 import { Button, Icon } from "@/ui/primitives";
 import { fdate, isPositive, money } from "@/ui/format";
 import { StatusBadge } from "./display";
+import { StampAndSign } from "./Stamp";
 
 export interface ReceiptData {
   receiptNo: string;
@@ -134,10 +135,11 @@ export function ReceiptPaper({ r, compact }: { r: ReceiptData; compact?: boolean
         )}
         {row("Remaining Balance", money(r.balance))}
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
+        <StampAndSign label={t("Cashier Signature")} stamp={compact ? 76 : 92} />
         <StatusBadge status={status} />
-        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{t("Thank you for choosing Orbit Cargo")}</span>
       </div>
+      <div style={{ textAlign: "center", fontSize: 11, color: "var(--text-muted)" }}>{t("Thank you for choosing Orbit Cargo")}</div>
     </div>
   );
 }

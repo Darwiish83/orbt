@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { assertYearOpen } from "@/modules/accounting/periods";
 import { ValidationError } from "@/lib/errors";
 import { logAudit } from "@/modules/audit/log";
 import { displayShipmentCode } from "@/modules/authz/adminScope";
@@ -464,6 +465,7 @@ export async function approveDemurrage(
   now = new Date(),
 ) {
   const { sh, lines } = await scopedCargo(db, actor, input.shipmentId, input.customerId, "invoices:manage");
+  await assertYearOpen(db, sh.originCountry, sh.businessYear);
   const arrived = sh.arrivedAt ?? sh.arrivalDate;
   if (sh.status !== "ARRIVED" || !arrived) throw new ValidationError("The shipment has not arrived");
   if (lines.every((l) => l.collectedAt)) throw new ValidationError("The cargo was already collected");

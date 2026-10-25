@@ -233,56 +233,6 @@ html[dir="rtl"] .admin-sidebar {
   }
 }
 
-.auth-admin {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background: var(--surface-page);
-}
-.auth-admin-aside {
-  background: var(--navy-700);
-  color: #fff;
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-.auth-admin-aside .auth-admin-lede,
-.auth-admin-aside .auth-admin-foot {
-  display: none;
-}
-.auth-admin-main {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 28px 20px 40px;
-  position: relative;
-  width: 100%;
-  max-width: 520px;
-  margin-inline: auto;
-  box-sizing: border-box;
-}
-@media (min-width: 900px) {
-  .auth-admin {
-    flex-direction: row;
-  }
-  .auth-admin-aside {
-    flex: 1;
-    padding: 56px;
-    justify-content: space-between;
-  }
-  .auth-admin-aside .auth-admin-lede,
-  .auth-admin-aside .auth-admin-foot {
-    display: block;
-  }
-  .auth-admin-main {
-    flex: none;
-    width: 520px;
-    max-width: none;
-    padding: 48px;
-    margin: 0;
-  }
-}
 
 /* Printable documents (/print/*): "Download PDF" uses the browser's Save as PDF. */
 .print-page {

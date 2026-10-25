@@ -148,6 +148,14 @@ enum DocumentKind {
   OTHER
 }
 
+// Which paper of a shipment a document is (owner 2026-10-25): an air
+// shipment has an origin AWB and a transit AWB; a container has one document.
+enum ShipmentDocPart {
+  ORIGIN_AWB
+  TRANSIT_AWB
+  CONTAINER
+}
+
 enum DocumentVisibility {
   PRIVATE
   CUSTOMER_VISIBLE
@@ -355,14 +363,15 @@ model Customer {
   status          CustomerStatus @default(ACTIVE)
   createdByUserId String?
 
-  user          User?
-  shipmentLines ShipmentLine[]
-  quotes        Quote[]
-  invoices      Invoice[]
-  payments      Payment[]
-  documents     Document[]
-  notifications Notification[]
-  receipts      Receipt[]
+  user             User?
+  shipmentLines    ShipmentLine[]
+  quotes           Quote[]
+  invoices         Invoice[]
+  payments         Payment[]
+  documents        Document[]
+  notifications    Notification[]
+  receipts         Receipt[]
+  transferReceipts TransferReceipt[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -675,6 +684,7 @@ model Document {
   customer         Customer?          @relation(fields: [customerId], references: [id], onDelete: Restrict)
   shipmentId       String?
   shipment         Shipment?          @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
+  shipmentPart     ShipmentDocPart? // set for "Upload Shipment" documents
   uploadedByUserId String?
   deletedAt        DateTime? // soft delete + retention
 
@@ -932,7 +942,9 @@ model CashOut {
   partner     Partner?
   bankId      String
   bank        Bank        @relation(fields: [bankId], references: [id], onDelete: Restrict)
-  sentTo      String? // recipient name + bank/phone (printed on the receipt)
+  sentTo      String? // recipient name (printed on the receipt)
+  sentVia     String? // how it was sent: a bank, EVC Plus, Zaad, cash … (owner 2026-10-25)
+  sentAccount String? // the recipient's account or phone number
   amount      Decimal     @db.Decimal(14, 2)
   // Paid now for an earlier year (owner 2026-10-24), e.g. 2025 shipment W-30:
   // it comes out of what that year left in the opening balance, once.
@@ -1010,8 +1022,13 @@ model PeriodClose {
   toDate      DateTime
   closedAt    DateTime    @default(now())
   actorUserId String?
+  // A Super Admin may reopen a period of a system year (2026 onward). The row
+  // is kept; at most one live (not reopened) close per country, year, period
+  // (partial unique index in the migration).
+  reopenedAt  DateTime?
+  reopenedBy  String?
 
-  @@unique([country, year, period])
+  @@index([country, year, period])
 }
 
 // Balance carried into a new year (from the previous year's closing balance).
@@ -1116,8 +1133,43 @@ model MoneyTransferRow {
   deletedAt      DateTime?
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
+  receipts       TransferReceipt[]
 
   @@index([country, year, month, kind])
+}
+
+// Receipt Voucher for money a customer hands over to be transferred (owner
+// 2026-10-25). Numbered 5000, 5001, … per year. With a customer reference it is
+// shown in that customer's Documents. One live receipt per transfer row
+// (partial unique index); a wrong one is voided and a new one made.
+model TransferReceipt {
+  id            String            @id @default(cuid())
+  year          Int
+  number        Int
+  country       String
+  transferRowId String?
+  transferRow   MoneyTransferRow? @relation(fields: [transferRowId], references: [id], onDelete: Restrict)
+  customerId    String?
+  customer      Customer?         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  receivedFrom  String // the customer's name (top of the paper)
+  receivedAt    DateTime          @db.Date
+  amount        Decimal           @db.Decimal(14, 2) // to send (after the fee)
+  fee           Decimal?          @db.Decimal(14, 2) // optional; shown only when typed
+  currency      String            @default("USD")
+  description   String // where it goes, e.g. "TO SINA"
+  actorUserId   String
+  voidedAt      DateTime?
+  voidedBy      String?
+  createdAt     DateTime          @default(now())
+
+  @@unique([year, number])
+  @@index([customerId])
+  @@index([transferRowId])
+}
+
+model TransferReceiptSequence {
+  year Int @id
+  next Int @default(1)
 }
 
 // "Start new month": months opened on the report (per country + year).

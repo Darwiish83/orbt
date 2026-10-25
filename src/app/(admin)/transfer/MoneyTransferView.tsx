@@ -7,7 +7,7 @@ import { DateField, Flag, Stat } from "@/ui/kit";
 import { Button, Dialog, Icon, IconButton, Input } from "@/ui/primitives";
 import type { monthReport, ReportRow } from "@/modules/transfer/money";
 import { ToastHost, useToast } from "@/components/admin/ui";
-import { deleteAction, handedAction, newMonthAction, saveReceiveAction, saveSendAction, type ReceiveValues, type SendValues } from "./actions";
+import { createReceiptAction, deleteAction, handedAction, newMonthAction, saveReceiveAction, saveSendAction, voidReceiptAction, type ReceiveValues, type SendValues, type TransferReceiptValues } from "./actions";
 
 type Report = Awaited<ReturnType<typeof monthReport>>;
 type Data = { report: Report; country: string; year: number; kind: "CUSTOMER" | "OPERATION" } | null;
@@ -48,6 +48,9 @@ function Inner({ data }: { data: NonNullable<Data> }) {
   const [form, setForm] = useState<(ReceiveValues & { id?: string }) | null>(null);
   const [send, setSend] = useState<(SendValues & { id: string; feePct: string; fee: string }) | null>(null);
   const [del, setDel] = useState<{ row: ReportRow; part: "receive" | "send" } | null>(null);
+  const [rcpt, setRcpt] = useState<ReportRow | null>(null);
+  const [voidR, setVoidR] = useState<ReportRow | null>(null);
+  const openReceipt = (id: string) => window.open(`/print/transfer-receipt/${id}`, "_blank", "noopener");
   const go = (patch: Record<string, string | null>) => {
     const p = new URLSearchParams(params.toString());
     for (const [k, v] of Object.entries(patch)) {
@@ -195,6 +198,15 @@ function Inner({ data }: { data: NonNullable<Data> }) {
                   )}
                   <td style={{ ...td, textAlign: "center", width: 80 }}>
                     <span style={{ display: "inline-flex", gap: 2 }}>
+                      {kind === "CUSTOMER" &&
+                        (r.receipt ? (
+                          <>
+                            <IconButton size="s" variant="ghost" label={`${t("Receipt")} No. ${r.receipt.number}`} icon={<Icon name="ReceiptText" size={13} color="var(--navy-700)" />} onClick={() => openReceipt(r.receipt!.id)} data-testid={`receipt-${r.description}`} />
+                            {A.canReceive && <IconButton size="s" variant="ghost" label={t("Void receipt")} icon={<Icon name="FileX2" size={13} color="#B91C1C" />} onClick={() => setVoidR(r)} />}
+                          </>
+                        ) : (
+                          A.canReceive && <IconButton size="s" variant="ghost" label={t("Create receipt")} icon={<Icon name="FilePlus2" size={13} color="var(--orange-600)" />} onClick={() => setRcpt(r)} data-testid={`create-receipt-${r.description}`} />
+                        ))}
                       {A.canReceive && !s && (
                         <IconButton size="s" variant="ghost" label={t(r.handed ? "Undo handed to sender" : "Mark as handed to sender")} icon={<Icon name={r.handed ? "Undo2" : "HandCoins"} size={13} color={r.handed ? undefined : "#C2410C"} />} onClick={() => act(handedAction(r.id, !r.handed), r.handed ? "Undo handed to sender" : "Handed to sender", r.description)} />
                       )}
@@ -253,6 +265,45 @@ function Inner({ data }: { data: NonNullable<Data> }) {
           onClose={() => setForm(null)}
           onSave={(v) => act(saveReceiveAction(form.id ?? null, v), "Saved", v.description.toUpperCase(), () => setForm(null))}
         />
+      )}
+      {rcpt && (
+        <ReceiptDialog
+          row={rcpt}
+          onClose={() => setRcpt(null)}
+          onSave={(v) =>
+            start(async () => {
+              const res = await createReceiptAction(rcpt.id, v);
+              if (!res.ok) return toast({ tone: "danger", title: res.error });
+              toast({ tone: "success", title: "Receipt created", message: `No. ${res.data!.number}` });
+              setRcpt(null);
+              router.refresh();
+              openReceipt(res.data!.id);
+            })
+          }
+        />
+      )}
+      {voidR?.receipt && (
+        <Dialog
+          open
+          title={t("Void receipt")}
+          onClose={() => setVoidR(null)}
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setVoidR(null)}>
+                {t("Cancel")}
+              </Button>
+              <Button onClick={() => act(voidReceiptAction(voidR.receipt!.id), "Receipt voided", `No. ${voidR.receipt!.number}`, () => setVoidR(null))}>{t("Void receipt")}</Button>
+            </>
+          }
+        >
+          <div style={{ fontSize: 14 }}>
+            <b>
+              {t("Receipt")} No. {voidR.receipt.number}
+            </b>{" "}
+            · {voidR.description}
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>{t("The receipt is kept as void. You can then create a new one for this transfer.")}</div>
+          </div>
+        </Dialog>
       )}
       {send && <SendDialog v={send} onClose={() => setSend(null)} onSave={(v) => act(saveSendAction(send.id, v), "Transfer saved", `${f2(v.amount)} ${v.currency}`, () => setSend(null))} />}
       {del && (
@@ -420,6 +471,66 @@ function SendDialog({ v: v0, onClose, onSave }: { v: SendValues & { feePct: stri
             </select>
           </label>
         </div>
+      </div>
+    </Dialog>
+  );
+}
+
+/** "Create receipt": filled from the row; the customer name on top, where the money goes below. */
+function ReceiptDialog({ row, onClose, onSave }: { row: ReportRow; onClose: () => void; onSave: (v: TransferReceiptValues) => void }) {
+  const t = useT();
+  const at = row.description.search(/\sTO\s/);
+  const [v, setV] = useState<TransferReceiptValues>({
+    receivedFrom: at > 0 ? row.description.slice(0, at).trim() : row.description,
+    reference: "",
+    amount: row.net,
+    fee: Number(row.fee) ? row.fee : "",
+    description: at > 0 ? row.description.slice(at).trim() : "",
+  });
+  const set = (k: keyof TransferReceiptValues, x: string) => setV((o) => ({ ...o, [k]: x }));
+  const amount = Number(v.amount) || 0;
+  const fee = Number(v.fee) || 0;
+  return (
+    <Dialog
+      open
+      width={500}
+      title={t("Create receipt")}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            {t("Cancel")}
+          </Button>
+          <Button onClick={() => onSave(v)} data-testid="save-receipt">
+            {t("Create receipt")}
+          </Button>
+        </>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+          {d(row.receivedAt)} · {row.currency} · {t("Numbered from 5000 each year.")}
+        </div>
+        <Input label={`${t("Received From")} *`} value={v.receivedFrom} onChange={(e) => set("receivedFrom", e.target.value)} placeholder="GALAD" />
+        <Input label={t("Customer Reference")} value={v.reference ?? ""} onChange={(e) => set("reference", e.target.value)} placeholder="OR-3000" hint={t("Optional. With the reference, the customer sees the receipt in their Documents.")} />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Input label={`${t("Amount to send")} *`} inputMode="decimal" value={v.amount} onChange={(e) => set("amount", e.target.value.replace(/[^\d.]/g, ""))} />
+          <Input label={`${t("Transfer fee")} (${t("optional")})`} inputMode="decimal" value={v.fee ?? ""} onChange={(e) => set("fee", e.target.value.replace(/[^\d.]/g, ""))} placeholder="0.00" />
+        </div>
+        {amount > 0 && (
+          <div style={{ padding: 10, borderRadius: 8, background: "var(--surface-sunken)", fontSize: 12 }}>
+            {fee > 0 ? (
+              <>
+                {t("Amount of")}: <b>{f2(amount)}</b> · {t("Transfer fee")}: <b>{f2(fee)}</b> · {t("Total amount")}: <b style={{ color: "var(--navy-700)" }}>{f2(amount + fee)}</b>
+              </>
+            ) : (
+              <>
+                {t("Amount of")}: <b>{f2(amount)}</b> · {t("No fee shown on the receipt")}
+              </>
+            )}
+          </div>
+        )}
+        <Input label={`${t("Description")} *`} value={v.description} onChange={(e) => set("description", e.target.value)} placeholder="TO SINA" />
       </div>
     </Dialog>
   );

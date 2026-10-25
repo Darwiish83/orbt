@@ -13,7 +13,9 @@ import {
   listReceipts,
   listShipmentCosts,
   outFormOptions,
+  overview,
   partnersProfit,
+  reopenPeriod,
   returnDebt,
   removeOpeningYear,
   reverseOpening,
@@ -57,6 +59,52 @@ async function world() {
   const ib = await createShipmentInvoice(prisma, admin, { shipmentId: w1.id, customerId: b.id, billedMeasure: "50", baseRate: "8" }); // 400
   const banks = await prisma.bank.findMany({ orderBy: { sortOrder: "asc" } });
   return { admin, a, b, w1, ia, ib, salaam: banks[0]!, cash: banks[3]! };
+}
+
+/** A closed year, written directly (for tests of the lock, not of closing). */
+async function lockYear(scope: { country: string; year: number }) {
+  await prisma.periodClose.create({
+    data: { country: scope.country, year: scope.year, period: "YEAR", fromDate: D(`${scope.year}-01-01`), toDate: new Date(`${scope.year}-12-31T23:59:59.999Z`) },
+  });
+}
+
+/** Pay out what stops the year from closing: shipment costs stage by stage, then the partners. */
+async function settle(admin: AuthzUser, scope: { country: string; year: number }, bankId: string, paidAt: Date) {
+  for (const r of (await listShipmentCosts(prisma, admin, scope)).rows) {
+    for (const st of ["ORIGIN", "TRANSIT", "ARRIVED"] as const) {
+      const left = Number(r.row.stages[st]) - Number(r.paid[st]);
+      if (left > 0) await addOut(prisma, admin, scope, { category: "SHIPMENT_COST", shipmentId: r.id, stage: st, amount: left.toFixed(2), bankId, paidAt });
+    }
+  }
+  for (const b of (await overview(prisma, admin, scope)).yearCheck!.blockers) {
+    if (b.key === "som" || b.key === "mah") {
+      await addOut(prisma, admin, scope, { category: "PROFIT_PAYOUT", partner: b.key === "som" ? "SOMALI_TRANSPORT" : "MAHAD", amount: b.amount, bankId, paidAt });
+    }
+  }
+  expect((await overview(prisma, admin, scope)).yearCheck!.blockers).toEqual([]);
+}
+
+/** A user with the given permissions and no Super Admin role. */
+async function staffWith(perms: string[]): Promise<AuthzUser> {
+  const r = await prisma.role.create({ data: { key: `s-${uniq()}`, name: "s" } });
+  for (const k of perms) {
+    const p = await prisma.permission.upsert({ where: { key: k }, create: { key: k }, update: {} });
+    await prisma.rolePermission.create({ data: { roleId: r.id, permissionId: p.id } });
+  }
+  const u = await prisma.user.create({ data: { email: `${uniq()}@o.so`, status: "ACTIVE" } });
+  await prisma.userRole.create({ data: { userId: u.id, roleId: r.id } });
+  return (await loadAuthzUser(prisma, u.id))!;
+}
+
+/** Run with the clock set to a day (dates in the future are refused). */
+async function at<T>(iso: string, fn: () => Promise<T>): Promise<T> {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(`${iso}T12:00:00Z`));
+  try {
+    return await fn();
+  } finally {
+    vi.useRealTimers();
+  }
 }
 
 describe("access and PIN", () => {
@@ -125,7 +173,7 @@ describe("cost sheets and profit", () => {
     await expect(saveCostSheet(prisma, originStaff, w1.id, "mgq", { trpr: "10" })).rejects.toThrow(/permission/i);
     await expect(saveCostSheet(prisma, admin, w1.id, "origin", { rate: "abc" })).rejects.toThrow(/fields/);
 
-    await closePeriod(prisma, admin, TR, "H2");
+    await lockYear(TR);
     await expect(saveCostSheet(prisma, admin, w1.id, "origin", { rate: "4" })).rejects.toThrow(/closed/);
   });
 });
@@ -135,8 +183,12 @@ describe("Income & Out", () => {
     const { admin, w1, ia, salaam, cash } = await world();
     await addShipmentPayment(prisma, admin, { invoiceId: ia.id, amount: "930", bankId: salaam.id, receivedAt: D("2026-10-05") });
     await saveCostSheet(prisma, admin, w1.id, "origin", { rate: "2" }); // origin = 2 × 150 kg + 20 fatura + 10 delivery = 330
-    const o = await addOut(prisma, admin, TR, { category: "SHIPMENT_COST", shipmentId: w1.id, stage: "ORIGIN", amount: "200", bankId: cash.id, paidAt: D("2026-10-06"), sentTo: "Istanbul agent" });
+    const o = await addOut(prisma, admin, TR, { category: "SHIPMENT_COST", shipmentId: w1.id, stage: "ORIGIN", amount: "200", bankId: cash.id, paidAt: D("2026-10-06"), sentTo: "Istanbul agent", sentVia: "EVC Plus", sentAccount: "615123456" });
     expect(o.receiptNo).toMatch(/^RCP-2026-\d+$/);
+    // Who it went to and how: kept apart, and printed on the voucher.
+    const voucher = (await listReceipts(prisma, admin, TR, {})).find((r) => r.number === o.receiptNo)!;
+    expect([voucher.party, voucher.via]).toEqual(["Istanbul agent", "EVC Plus 615123456"]);
+    expect((await incomeAndOut(prisma, admin, TR)).outs.find((x) => x.receiptNo === o.receiptNo)).toMatchObject({ sentTo: "Istanbul agent", sentVia: "EVC Plus", sentAccount: "615123456" });
     await addOut(prisma, admin, TR, { category: "EXPENSE", amount: "30", bankId: salaam.id, paidAt: D("2026-10-07"), note: "Office" });
 
     let io = await incomeAndOut(prisma, admin, TR);
@@ -201,35 +253,90 @@ describe("Income & Out", () => {
 });
 
 describe("period closing", () => {
-  it("locks Finance and Accounting in the period and carries the year balance forward", async () => {
-    const { admin, ia, ib, salaam } = await world();
+  it("the year closes only when everything is paid out; then nothing of it changes, whatever the date", async () => {
+    const { admin, a, w1, ia, ib, salaam } = await world();
     await addShipmentPayment(prisma, admin, { invoiceId: ia.id, amount: "100", bankId: salaam.id, receivedAt: D("2026-10-05") });
-    const writer = await (async () => {
-      const r = await prisma.role.create({ data: { key: `w-${uniq()}`, name: "w" } });
-      for (const k of ["accounting:read", "accounting:write"]) {
-        const p = await prisma.permission.upsert({ where: { key: k }, create: { key: k }, update: {} });
-        await prisma.rolePermission.create({ data: { roleId: r.id, permissionId: p.id } });
-      }
-      const u = await prisma.user.create({ data: { email: `${uniq()}@o.so`, status: "ACTIVE" } });
-      await prisma.userRole.create({ data: { userId: u.id, roleId: r.id } });
-      return (await loadAuthzUser(prisma, u.id))!;
-    })();
+    const writer = await staffWith(["accounting:read", "accounting:write"]);
     await expect(closePeriod(prisma, writer, TR, "YEAR")).rejects.toThrow(/permission/i);
-    await closePeriod(prisma, admin, TR, "YEAR");
+
+    // W-1's cost (fatura + delivery = 30) is not paid, and what was collected for it is still held.
+    const check = (await overview(prisma, admin, TR)).yearCheck!;
+    expect(check.blockers.map((b) => b.key)).toEqual(["costDue", "cost"]);
+    expect(check.blockers[0]!.detail).toEqual([{ code: "W-1", amount: "30" }]);
+    expect(check.customersOwe).toEqual({ count: 2, amount: "1230" }); // 830 + 400 — not a stop
+    await expect(closePeriod(prisma, admin, TR, "YEAR")).rejects.toThrow(/only Orbit profit/);
+    await expect(closePeriod(prisma, admin, TR, "H2")).rejects.toThrow(/full year/);
+
+    // W-48 style: the year is finished in January of the next year, still as 2026.
+    await at("2027-01-20", async () => {
+      await settle(admin, TR, salaam.id, D("2027-01-10"));
+      await closePeriod(prisma, admin, TR, "YEAR");
+    });
     await expect(closePeriod(prisma, admin, TR, "YEAR")).rejects.toThrow(/already closed/);
-    await expect(addShipmentPayment(prisma, admin, { invoiceId: ib.id, amount: "10", bankId: salaam.id, receivedAt: D("2026-10-20") })).rejects.toThrow(/closed/);
-    await expect(addOut(prisma, admin, TR, { category: "EXPENSE", amount: "5", bankId: salaam.id, paidAt: D("2026-10-21") })).rejects.toThrow(/closed/);
-    // 2027 opens with 2026's balance; its banks and parts each add up to it.
-    const next = await prisma.openingEntry.findMany({ where: { country: "Turkey", year: 2027 } });
-    expect(next.every((e) => e.carried && e.fromYear === 2026)).toBe(true);
-    const total = (k: string) => next.filter((e) => e.kind === k).reduce((a, e) => a + Number(e.amount), 0);
-    expect([total("TOTAL"), total("BANK"), total("SOURCE")]).toEqual([100, 100, 100]);
-    expect((await incomeAndOut(prisma, admin, { country: "Turkey", year: 2027 })).balance).toBe("100");
+
+    // Locked, whatever the date: outs, payments, invoices, shipments, cost sheets.
+    await at("2027-02-01", async () => {
+      await expect(addOut(prisma, admin, TR, { category: "EXPENSE", amount: "5", bankId: salaam.id, paidAt: D("2027-01-25") })).rejects.toThrow(/year is closed/);
+      await expect(addShipmentPayment(prisma, admin, { invoiceId: ib.id, amount: "10", bankId: salaam.id, receivedAt: D("2027-01-25") })).rejects.toThrow(/Accounting → Debts/);
+    });
+    await expect(saveCostSheet(prisma, admin, w1.id, "origin", { rate: "4" })).rejects.toThrow(/closed/);
+    await expect(addShipmentLine(prisma, admin, w1.id, { customerId: a.id, packages: 1, chargeableWeightKg: "5", rate: "8" })).rejects.toThrow(/year is closed/);
+    await expect(createShipment(prisma, admin, { mode: "AIR", originCountry: "Turkey", businessYear: 2026, shipDate: D("2026-12-20") })).rejects.toThrow(/year is closed/);
+
+    // 2027 opens with Orbit profit only, and the customers who still owe as debts.
+    const next = { country: "Turkey", year: 2027 };
+    const lines = await prisma.openingEntry.findMany({ where: { ...next, reversedAt: null } });
+    expect(lines.every((e) => e.carried && e.fromYear === 2026)).toBe(true);
+    const balance = (await incomeAndOut(prisma, admin, TR)).balance;
+    const total = (k: string) => lines.filter((e) => e.kind === k).reduce((s, e) => s + Number(e.amount), 0).toFixed(2);
+    expect([total("TOTAL"), total("BANK"), total("SOURCE")]).toEqual([Number(balance).toFixed(2), Number(balance).toFixed(2), Number(balance).toFixed(2)]);
+    expect(lines.filter((e) => e.kind === "SOURCE").map((e) => e.source)).toEqual(["PROFIT"]);
+    const owed = (await listDebts(prisma, admin, next)).rows;
+    expect(owed.map((d) => [d.person.split(" — ")[1], d.note, d.owed]).sort()).toEqual([
+      ["Alpha", `W-1 · ${ia.number}`, "830"],
+      ["Beta", `W-1 · ${ib.number}`, "400"],
+    ]);
+    // The customer pays in 2027: the money is 2027's, the closed year is untouched.
+    const beta = owed.find((d) => d.note?.includes(ib.number))!;
+    await at("2027-02-01", () => returnDebt(prisma, admin, { debtId: beta.id, amount: "400", bankId: salaam.id, returnedAt: D("2027-01-30") }));
+    expect((await incomeAndOut(prisma, admin, next)).balance).toBe(String(Number(balance) + 400));
+    expect((await incomeAndOut(prisma, admin, TR)).balance).toBe(balance);
+    await expect(reverseOpening(prisma, admin, beta.id)).rejects.toThrow(/carried/);
+  });
+
+  it("only a Super Admin reopens, from 2026 on; reopening the year takes back what it carried", async () => {
+    const { admin, ib, salaam } = await world();
+    await settle(admin, TR, salaam.id, D("2026-10-10"));
+    await closePeriod(prisma, admin, TR, "YEAR");
+    const manager = await staffWith(["accounting:read", "accounting:write", "accounting:manage"]);
+    await expect(reopenPeriod(prisma, manager, TR, "YEAR")).rejects.toThrow(/Super Admin/);
+    await expect(reopenPeriod(prisma, admin, { country: "Turkey", year: 2025 }, "YEAR")).rejects.toThrow(/before 2026/);
+    await expect(closePeriod(prisma, admin, { country: "Turkey", year: 2025 }, "H1")).rejects.toThrow(/before 2026/);
+    await expect(reopenPeriod(prisma, admin, TR, "H1")).rejects.toThrow(/not closed/);
+    expect((await overview(prisma, manager, TR)).canReopen).toBe(false);
+    expect((await overview(prisma, admin, TR)).canReopen).toBe(true);
+
+    // A debt carried into 2027 that was already paid back stops the reopen.
+    const next = { country: "Turkey", year: 2027 };
+    const debt = (await listDebts(prisma, admin, next)).rows[0]!;
+    await at("2027-02-01", () => returnDebt(prisma, admin, { debtId: debt.id, amount: "1", bankId: salaam.id, returnedAt: D("2027-01-30") }));
+    await expect(reopenPeriod(prisma, admin, TR, "YEAR")).rejects.toThrow(/already returned/);
+    await prisma.debtReturn.deleteMany({});
+
+    await reopenPeriod(prisma, admin, TR, "YEAR");
+    expect(await prisma.openingEntry.count({ where: { ...next, reversedAt: null } })).toBe(0);
+    expect(await prisma.periodClose.count({ where: { reopenedAt: { not: null }, reopenedBy: admin.id } })).toBe(1);
+    await addShipmentPayment(prisma, admin, { invoiceId: ib.id, amount: "400", bankId: salaam.id, receivedAt: D("2026-10-20") });
+    await settle(admin, TR, salaam.id, D("2026-10-21")); // Beta's money makes partners' shares to pay out
+    // Closed again: the carry is written anew from the corrected year.
+    await closePeriod(prisma, admin, TR, "YEAR");
+    const carried = await prisma.openingEntry.findMany({ where: { ...next, reversedAt: null, kind: "DEBT" } });
+    expect(carried.map((e) => e.note)).toEqual([expect.stringContaining("W-1")]); // only Alpha still owes
   });
 });
 
 describe("opening balance from earlier years", () => {
-  it("a year's balance first, then banks and parts that must equal it; it adds to the company balance", async () => {
+  it("a year's balance first, then the banks that must equal it; it is Orbit profit and adds to the company balance", async () => {
     const { admin, salaam, cash } = await world();
     const writer = await (async () => {
       const r = await prisma.role.create({ data: { key: `w-${uniq()}`, name: "w" } });
@@ -248,30 +355,21 @@ describe("opening balance from earlier years", () => {
         { bankId: salaam.id, amount: "700" },
         { bankId: cash.id, amount: "300" },
       ],
-      parts: [
-        { source: "TRANSFER" as const, amount: "600" },
-        { source: "PROFIT" as const, amount: "350" },
-        { source: "MAHAD" as const, amount: "50" },
-      ],
     };
     await expect(saveOpeningYear(prisma, writer, TR, y2025)).rejects.toThrow(/permission/i);
     await expect(saveOpeningYear(prisma, admin, TR, { ...y2025, fromYear: 2026 })).rejects.toThrow(/year/);
     await expect(saveOpeningYear(prisma, admin, TR, { ...y2025, total: "0" })).rejects.toThrow(/balance/);
     await expect(saveOpeningYear(prisma, admin, TR, { ...y2025, banks: [{ bankId: salaam.id, amount: "700" }] })).rejects.toThrow(/banks must add up/);
-    await expect(saveOpeningYear(prisma, admin, TR, { ...y2025, parts: [{ source: "TRANSFER", amount: "600" }] })).rejects.toThrow(/parts must add up/);
-    await expect(saveOpeningYear(prisma, admin, TR, { ...y2025, parts: [{ source: "DEBT", amount: "1000" }] })).rejects.toThrow(/came from/);
-    // Partners' parts only where the country splits profit.
-    await expect(saveOpeningYear(prisma, admin, { country: "India", year: 2026 }, { ...y2025, banks: [{ bankId: salaam.id, amount: "1000" }], parts: [{ source: "MAHAD", amount: "1000" }] })).rejects.toThrow();
 
     await saveOpeningYear(prisma, admin, TR, y2025);
-    await saveOpeningYear(prisma, admin, TR, { fromYear: 2024, total: "-200", banks: [{ bankId: cash.id, amount: "-200" }], parts: [{ source: "TRANSFER", amount: "-200" }] });
+    await saveOpeningYear(prisma, admin, TR, { fromYear: 2024, total: "-200", banks: [{ bankId: cash.id, amount: "-200" }] });
 
     let op = await listOpening(prisma, admin, TR);
     const y = op.years.find((x) => x.fromYear === 2025)!;
     expect(y.total).toBe("1000");
     expect(y.banks.map((b) => b.amount).sort()).toEqual(["300", "700"]); // only what was typed
-    expect(y.parts.map((p) => p.source).sort()).toEqual(["MAHAD", "PROFIT", "TRANSFER"]);
-    expect(op.parts).toContain("SOMALI_TRANSPORT");
+    // The whole balance is Orbit profit (owner 2026-10-25).
+    expect(op.history.filter((h) => h.fromYear === 2025 && h.kind === "SOURCE").map((h) => [h.source, h.amount])).toEqual([["PROFIT", "1000"]]);
 
     let io = await incomeAndOut(prisma, admin, TR);
     expect(io.opening).toBe("800"); // 1000 − 200
@@ -279,14 +377,14 @@ describe("opening balance from earlier years", () => {
     expect(io.perBank.find((b) => b.bankId === salaam.id)!.opening).toBe("700");
     expect(io.perBank.find((b) => b.bankId === cash.id)!.opening).toBe("100");
     const row = (k: string) => io.composition.find((r) => r.key === k)!;
-    expect([row("transfer").opening, row("orbit").opening, row("mah").opening]).toEqual(["400", "350", "50"]);
-    expect((await partnersProfit(prisma, admin, TR)).mahad.hold).toBe("50");
+    expect([row("transfer").opening, row("orbit").opening, row("mah").opening]).toEqual(["0", "800", "0"]);
+    expect((await partnersProfit(prisma, admin, TR)).mahad.hold).toBe("0");
 
     // Saving the year again replaces it; the old lines stay, reversed.
-    await saveOpeningYear(prisma, admin, TR, { ...y2025, total: "1200", banks: [{ bankId: salaam.id, amount: "1200" }], parts: [{ source: "PROFIT", amount: "1200" }] });
+    await saveOpeningYear(prisma, admin, TR, { ...y2025, total: "1200", banks: [{ bankId: salaam.id, amount: "1200" }] });
     op = await listOpening(prisma, admin, TR);
     expect(op.years.find((x) => x.fromYear === 2025)!.banks).toHaveLength(1);
-    expect(op.history.filter((h) => h.fromYear === 2025 && h.reversed)).toHaveLength(6);
+    expect(op.history.filter((h) => h.fromYear === 2025 && h.reversed)).toHaveLength(4);
     expect((await incomeAndOut(prisma, admin, TR)).balance).toBe("1000");
 
     // Remove a year: it stops counting, history kept.
@@ -313,78 +411,65 @@ describe("opening balance from earlier years", () => {
     await expect(saveOpeningYear(prisma, admin, TR, y2025)).rejects.toThrow(/closed/);
   });
 
-  it("closing a year carries its balance, banks, parts and open debts into the next", async () => {
+  it("closing a year carries its balance, banks, Orbit profit and open debts into the next", async () => {
     const { admin, ia, salaam } = await world();
     await addShipmentPayment(prisma, admin, { invoiceId: ia.id, amount: "100", bankId: salaam.id, receivedAt: D("2026-10-05") });
-    await saveOpeningYear(prisma, admin, TR, { fromYear: 2025, total: "50", banks: [{ bankId: salaam.id, amount: "50" }], parts: [{ source: "PROFIT", amount: "50" }] });
+    await saveOpeningYear(prisma, admin, TR, { fromYear: 2025, total: "50", banks: [{ bankId: salaam.id, amount: "50" }] });
     await addOpeningDebt(prisma, admin, TR, { fromYear: 2025, amount: "20", person: "Omar" });
+    await settle(admin, TR, salaam.id, D("2026-10-06"));
+    const balance = (await incomeAndOut(prisma, admin, TR)).balance;
     await closePeriod(prisma, admin, TR, "YEAR");
     const next = await listOpening(prisma, admin, { country: "Turkey", year: 2027 });
     const y = next.years.find((x) => x.fromYear === 2026)!;
-    expect([y.total, y.carried]).toEqual(["150", true]);
-    expect(y.banks).toEqual([expect.objectContaining({ bankId: salaam.id, amount: "150" })]);
-    expect(y.parts.reduce((a, p) => a + Number(p.amount), 0)).toBe(150);
-    expect(y.debts.map((x) => [x.person, x.amount])).toEqual([["Omar", "20"]]);
-    expect((await incomeAndOut(prisma, admin, { country: "Turkey", year: 2027 })).balance).toBe("150");
+    expect([y.total, y.carried]).toEqual([balance, true]);
+    expect(y.banks).toEqual([expect.objectContaining({ bankId: salaam.id, amount: balance })]);
+    expect(next.history.filter((h) => h.fromYear === 2026 && h.kind === "SOURCE").map((h) => [h.source, h.amount])).toEqual([["PROFIT", balance]]);
+    expect(y.debts.map((x) => x.person)).toEqual(expect.arrayContaining(["Omar", expect.stringContaining("Alpha"), expect.stringContaining("Beta")]));
+    expect((await incomeAndOut(prisma, admin, { country: "Turkey", year: 2027 })).balance).toBe(balance);
+    // A carried year is not typed: it can't be added, edited or paid "for" from 2027.
+    await expect(saveOpeningYear(prisma, admin, { country: "Turkey", year: 2027 }, { fromYear: 2026, total: "1", banks: [{ bankId: salaam.id, amount: "1" }] })).rejects.toThrow(/carried automatically/);
+    expect((await outFormOptions(prisma, admin, { country: "Turkey", year: 2027 })).earlierYears).toEqual([]);
   });
 
-  it("an out paid now for an earlier year comes out of what that year left, once, with its receipt", async () => {
+  it("an out paid now for an earlier year comes out of that year's Orbit profit, once, with its receipt", async () => {
     const { admin, salaam } = await world();
-    await saveOpeningYear(prisma, admin, TR, {
-      fromYear: 2025,
-      total: "1000",
-      banks: [{ bankId: salaam.id, amount: "1000" }],
-      parts: [
-        { source: "SHIPMENT_COST", amount: "400" },
-        { source: "TRANSFER", amount: "500" },
-        { source: "MAHAD", amount: "100" },
-      ],
-    });
+    await saveOpeningYear(prisma, admin, TR, { fromYear: 2025, total: "1000", banks: [{ bankId: salaam.id, amount: "1000" }] });
     const out = (x: Partial<Parameters<typeof addOut>[3]>) => addOut(prisma, admin, TR, { category: "SHIPMENT_COST", amount: "300", bankId: salaam.id, paidAt: D("2026-10-12"), forYear: 2025, ...x });
     await expect(out({ reference: "" })).rejects.toThrow(/W-30/);
-    await expect(out({ amount: "500", reference: "W-30" })).rejects.toThrow(/left from that year/);
+    await expect(out({ amount: "1000.01", reference: "W-30" })).rejects.toThrow(/left from that year/);
     await expect(out({ forYear: 2024, reference: "W-30" })).rejects.toThrow(/no opening balance/);
     await expect(out({ category: "DEBT", sentTo: "Ali", reference: "x" })).rejects.toThrow(/cannot belong/);
+    await expect(out({ category: "PROFIT_PAYOUT", partner: "MAHAD", amount: "100" })).rejects.toThrow(/cannot belong/);
     const w30 = await out({ reference: "W-30", sentTo: "Istanbul agent" });
-    await out({ category: "PROFIT_PAYOUT", partner: "MAHAD", amount: "100" });
-    await expect(out({ category: "PROFIT_PAYOUT", partner: "MAHAD", amount: "1" })).rejects.toThrow(/left from that year/);
+    await out({ category: "TRANSFER", amount: "600", sentTo: "Hodan" });
+    await expect(out({ category: "EXPENSE", amount: "100.01" })).rejects.toThrow(/left from that year/);
 
-    // One deduction: the balance and the shipment-cost row drop once.
+    // One deduction, from Orbit profit: this year's parts are untouched.
     const io = await incomeAndOut(prisma, admin, TR);
-    expect(io.balance).toBe("600"); // 1000 − 300 − 100
-    const cost = io.composition.find((r) => r.key === "cost")!;
-    expect([cost.opening, cost.out, cost.remaining]).toEqual(["400", "300", "100"]);
-    expect(io.composition.find((r) => r.key === "mah")!.remaining).toBe("0");
+    expect(io.balance).toBe("100"); // 1000 − 300 − 600
+    const r = (k: string) => io.composition.find((x) => x.key === k)!;
+    expect([r("cost").out, r("cost").remaining, r("transfer").remaining]).toEqual(["0", "0", "0"]);
+    expect([r("orbit").opening, r("orbit").out, r("orbit").remaining]).toEqual(["1000", "900", "100"]);
     expect(io.outs.find((o) => o.id === w30.id)).toMatchObject({ forYear: 2025, reference: "W-30" });
 
     // The year shows what was paid for it, with the receipts, and what is left.
     const y = (await listOpening(prisma, admin, TR)).years.find((x) => x.fromYear === 2025)!;
-    expect(y.parts.find((p) => p.source === "SHIPMENT_COST")).toMatchObject({ paid: "300", left: "100" });
     expect(y.paidAfter.map((p) => [p.what, p.amount, p.receiptNo])).toEqual([
       ["W-30", "300", w30.receiptNo],
-      [null, "100", expect.stringMatching(/^RCP-2026-/)],
+      [null, "600", expect.stringMatching(/^RCP-2026-/)],
     ]);
-    expect(y.paidTotal).toBe("400");
+    expect([y.paidTotal, y.left]).toEqual(["900", "100"]);
     const rc = (await listReceipts(prisma, admin, TR, {})).find((r) => r.number === w30.receiptNo)!;
     expect(rc.note).toContain("For 2025 · W-30");
-    expect((await outFormOptions(prisma, admin, TR)).earlierYears[0]!.parts.find((p) => p.source === "SHIPMENT_COST")!.left).toBe("100");
+    expect((await outFormOptions(prisma, admin, TR)).earlierYears).toEqual([{ fromYear: 2025, left: "100" }]);
   });
 
-  it("a shipment of a closed year that is in the system can be paid the next year", async () => {
-    const { admin, ia, w1, salaam } = await world();
-    await addShipmentPayment(prisma, admin, { invoiceId: ia.id, amount: "100", bankId: salaam.id, receivedAt: D("2026-10-05") });
-    await closePeriod(prisma, admin, TR, "YEAR");
-    const next = { country: "Turkey", year: 2027 };
-    const left = (await listOpening(prisma, admin, next)).years[0]!.parts.find((p) => p.source === "SHIPMENT_COST")!.amount;
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2027-01-15T12:00:00Z"));
-    try {
-      await addOut(prisma, admin, next, { category: "SHIPMENT_COST", amount: left, bankId: salaam.id, paidAt: D("2027-01-10"), forYear: 2026, shipmentId: w1.id, stage: "ORIGIN" });
-    } finally {
-      vi.useRealTimers();
-    }
-    expect((await listShipmentCosts(prisma, admin, TR, "AIR")).rows.find((r) => r.id === w1.id)!.paid.ORIGIN).toBe(left);
-    expect((await incomeAndOut(prisma, admin, next)).balance).toBe(String(100 - Number(left)));
-    expect((await incomeAndOut(prisma, admin, TR)).balance).toBe("100"); // the closed year is not touched
+  it("an earlier-year out is only for a typed year before 2026, with the shipment typed in", async () => {
+    const { admin, w1, salaam } = await world();
+    await saveOpeningYear(prisma, admin, TR, { fromYear: 2025, total: "100", banks: [{ bankId: salaam.id, amount: "100" }] });
+    const base = { category: "SHIPMENT_COST" as const, amount: "10", bankId: salaam.id, paidAt: D("2026-10-12") };
+    await expect(addOut(prisma, admin, TR, { ...base, forYear: 2025, shipmentId: w1.id, stage: "ORIGIN", reference: "W-1" })).rejects.toThrow(/Shipment not found/);
+    await expect(addOut(prisma, admin, TR, { ...base, forYear: 2026, reference: "W-1" })).rejects.toThrow(/year it belongs to/);
+    await addOut(prisma, admin, TR, { ...base, forYear: 2025, reference: "W-30" });
   });
 });

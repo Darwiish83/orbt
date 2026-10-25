@@ -21,6 +21,7 @@ export async function uploadDocumentAction(formData: FormData) {
           reference: z.string().trim().max(80).optional(),
           filename: z.string().trim().max(180).optional(),
           kind: z.enum(["INVOICE", "IDENTITY", "CARGO_DOC", "OTHER"]),
+          part: z.enum(["ORIGIN_AWB", "TRANSIT_AWB", "CONTAINER"]).optional(),
         })
         .parse({
           target: formData.get("target"),
@@ -29,6 +30,7 @@ export async function uploadDocumentAction(formData: FormData) {
           reference: formData.get("reference") || undefined,
           filename: formData.get("filename") || undefined,
           kind: formData.get("kind"),
+          part: formData.get("part") || undefined,
         });
       const file = formData.get("file");
       if (!(file instanceof File) || file.size === 0) throw new z.ZodError([]);

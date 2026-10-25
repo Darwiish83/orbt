@@ -53,7 +53,8 @@ export default async function AccountingPage({ searchParams }: { searchParams: P
   if (tab === "income") {
     const filter = OUTS.includes(sp.out as OutCategory) ? (sp.out as OutCategory) : undefined;
     const [io, balances, options] = await Promise.all([
-      incomeAndOut(prisma, user, scope, filter),
+      // All outs: the tab filters them by category (with counts per category).
+      incomeAndOut(prisma, user, scope),
       countryBalances(prisma, user, scope.year, scope.countries.map((c) => c.name)),
       outFormOptions(prisma, user, scope),
     ]);

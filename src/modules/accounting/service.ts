@@ -17,11 +17,11 @@ import {
 
   type Split,
 } from "./calc";
-import { assertOpen } from "./periods";
+import { assertOpenFor, isClosed, isYearClosed, SYSTEM_START_YEAR } from "./periods";
 import { requireAccountingAccess } from "./pin";
 import { transferIncomeOf } from "@/modules/transfer/money";
 
-export { assertOpen, isClosed } from "./periods";
+export { assertOpen, isClosed, isYearClosed } from "./periods";
 
 /**
  * Accounting (spec B10 / revised prompt §11), per country + business year.
@@ -148,7 +148,7 @@ export async function saveCostSheet(db: PrismaClient, actor: AuthzUser, shipment
   const sh = await db.shipment.findUnique({ where: { id: shipmentId }, include: { costSheet: true } });
   if (!sh) throw new ValidationError("Shipment not found");
   requireScope(actor, { country: sh.originCountry, businessYear: sh.businessYear });
-  await assertOpen(db, sh.originCountry, sh.shipDate ?? sh.createdAt);
+  await assertOpenFor(db, sh.originCountry, { year: sh.businessYear, date: sh.shipDate ?? sh.createdAt });
   const schema = sh.mode === "AIR" ? (sheet === "origin" ? airOriginSchema : airMgqSchema) : sheet === "origin" ? seaOriginSchema : seaMgqSchema;
   const stored = (sh.costSheet?.[sheet] ?? {}) as Record<string, unknown>;
   const parsed = schema.safeParse({ ...stored, ...values });
@@ -277,15 +277,19 @@ export async function incomeAndOut(db: PrismaClient, actor: AuthzUser, scope: Sc
     const op = openingFor(f, key);
     rows.push({ key, label, opening: s2(op), in: s2(i), out: s2(o), remaining: s2(op.add(i).minus(o)) });
   };
-  add("transfer", "Transfer", moneyReceive, outsBy(f.outs, "TRANSFER"));
-  add("commission", "Commission", commissionIn, outsBy(f.outs, "COMMISSION"));
-  add("cost", "Shipments cost", costIn, outsBy(f.outs, "SHIPMENT_COST"));
+  // An out paid for an earlier year comes out of that year's balance, which is
+  // Orbit profit (owner 2026-10-25); only this year's outs pay this year's parts.
+  const cur = f.outs.filter((o) => o.forYear === null);
+  const earlierOut = sum(f.outs.filter((o) => o.forYear !== null).map((o) => o.amount));
+  add("transfer", "Transfer", moneyReceive, outsBy(cur, "TRANSFER"));
+  add("commission", "Commission", commissionIn, outsBy(cur, "COMMISSION"));
+  add("cost", "Shipments cost", costIn, outsBy(cur, "SHIPMENT_COST"));
   if (hasSplit) {
-    add("som", "Somali Transport profit", shares.som, outsBy(f.outs, "PROFIT_PAYOUT", "SOMALI_TRANSPORT"));
-    add("mah", "Mahad profit", shares.mah, outsBy(f.outs, "PROFIT_PAYOUT", "MAHAD"));
+    add("som", "Somali Transport profit", shares.som, outsBy(cur, "PROFIT_PAYOUT", "SOMALI_TRANSPORT"));
+    add("mah", "Mahad profit", shares.mah, outsBy(cur, "PROFIT_PAYOUT", "MAHAD"));
   }
   const others = sum(rows.map((r) => dec(r.remaining)));
-  const orbitOut = outsBy(f.outs, "EXPENSE").add(outsBy(f.outs, "DEBT"));
+  const orbitOut = outsBy(cur, "EXPENSE").add(outsBy(cur, "DEBT")).add(earlierOut);
   const orbitRemaining = balance.minus(others);
   const orbitOpening = f.legacyOpening.add(openingFor(f, "orbit"));
   rows.push({ key: "orbit", label: "Orbit profit", opening: s2(orbitOpening), in: s2(orbitRemaining.add(orbitOut).minus(orbitOpening)), out: s2(orbitOut), remaining: s2(orbitRemaining) });
@@ -296,6 +300,9 @@ export async function incomeAndOut(db: PrismaClient, actor: AuthzUser, scope: Sc
       date: p.payment.receivedAt.toISOString(),
       kind: "Shipment collection",
       detail: `${p.payment.customer.ref} — ${p.payment.customer.name} · ${displayShipmentCode(p.invoice.shipment!.code)} · ${p.invoice.number}`,
+      // For grouping the Income list per shipment.
+      shipment: displayShipmentCode(p.invoice.shipment!.code) as string | null,
+      mode: p.invoice.shipment!.mode as string | null,
       bank: p.payment.bank?.name ?? null,
       receiptNo: p.payment.receipt?.number ?? null,
       amount: s2(p.amount),
@@ -305,6 +312,8 @@ export async function incomeAndOut(db: PrismaClient, actor: AuthzUser, scope: Sc
       date: r.receivedAt.toISOString(),
       kind: "Money Receive",
       detail: r.description,
+      shipment: null,
+      mode: null,
       bank: null,
       receiptNo: null,
       amount: s2(r.amount),
@@ -314,6 +323,8 @@ export async function incomeAndOut(db: PrismaClient, actor: AuthzUser, scope: Sc
       date: r.returnedAt.toISOString(),
       kind: "Debt returned",
       detail: r.cashOut?.sentTo ?? r.openingEntry?.person ?? "-",
+      shipment: null,
+      mode: null,
       bank: r.bank.name,
       receiptNo: r.receipt.number,
       amount: s2(r.amount),
@@ -333,6 +344,8 @@ export async function incomeAndOut(db: PrismaClient, actor: AuthzUser, scope: Sc
       reference: o.reference,
       bank: o.bank.name,
       sentTo: o.sentTo,
+      sentVia: o.sentVia,
+      sentAccount: o.sentAccount,
       note: o.note,
       receiptNo: o.receipt.number,
       amount: s2(o.amount),
@@ -359,10 +372,12 @@ async function transferIncome(db: Db, scope: Scope): Promise<Prisma.Decimal> {
 
 /** Balances of every allowed country for the year (+ total). */
 export async function countryBalances(db: PrismaClient, actor: AuthzUser, year: number, countries: string[]) {
-  const out: { country: string; balance: string }[] = [];
+  const out: { country: string; balance: string; in: string; out: string }[] = [];
   for (const country of countries) {
     try {
-      out.push({ country, balance: (await incomeAndOut(db, actor, { country, year })).balance });
+      const io = await incomeAndOut(db, actor, { country, year });
+      // In = everything the balance is built from (incl. the opening balance).
+      out.push({ country, balance: io.balance, in: s2(dec(io.balance).add(dec(io.totals.out))), out: io.totals.out });
     } catch (e) {
       if (!(e instanceof AuthorizationError)) throw e;
     }
@@ -396,7 +411,12 @@ export interface AddOutInput {
   amount: string;
   bankId: string;
   paidAt: Date;
+  /** Who it went to (name). */
   sentTo?: string;
+  /** How it went: a bank, EVC Plus, Zaad, cash … */
+  sentVia?: string;
+  /** Their account or phone number. */
+  sentAccount?: string;
   note?: string;
   shipmentId?: string;
   stage?: CostStage;
@@ -409,24 +429,16 @@ export interface AddOutInput {
   reference?: string;
 }
 
-/** Which part of an earlier year's balance an out for that year comes out of. */
-function partOfOut(category: OutCategory, partner?: Partner | null): Exclude<OpeningSource, "DEBT"> | null {
-  if (category === "SHIPMENT_COST") return "SHIPMENT_COST";
-  if (category === "TRANSFER") return "TRANSFER";
-  if (category === "COMMISSION") return "COMMISSION";
-  if (category === "EXPENSE") return "PROFIT";
-  if (category === "PROFIT_PAYOUT") return partner === "MAHAD" ? "MAHAD" : partner === "SOMALI_TRANSPORT" ? "SOMALI_TRANSPORT" : null;
-  return null;
-}
+/** Outs that can be paid for an earlier year (they come out of its Orbit profit). */
+const EARLIER_OUT: OutCategory[] = ["SHIPMENT_COST", "TRANSFER", "COMMISSION", "EXPENSE"];
 
-/** What an earlier year left for each part, what was paid for it since, and what is still left. */
-async function earlierYearParts(db: Db, scope: Scope, fromYear: number) {
-  const [lines, outs] = await Promise.all([
-    db.openingEntry.findMany({ where: { country: scope.country, year: scope.year, fromYear, kind: "SOURCE", reversedAt: null } }),
+/** What an earlier year's balance (Orbit profit) still has after what was paid for it since. */
+async function earlierYearLeft(db: Db, scope: Scope, fromYear: number) {
+  const [total, outs] = await Promise.all([
+    db.openingEntry.findFirst({ where: { country: scope.country, year: scope.year, fromYear, kind: "TOTAL", reversedAt: null } }),
     db.cashOut.findMany({ where: { country: scope.country, year: scope.year, forYear: fromYear, reversedAt: null } }),
   ]);
-  const paid = (p: OpeningSource) => sum(outs.filter((o) => partOfOut(o.category, o.partner) === p).map((o) => o.amount));
-  return lines.map((l) => ({ source: l.source!, amount: l.amount, paid: paid(l.source!), left: l.amount.minus(paid(l.source!)) }));
+  return (total?.amount ?? D0()).minus(sum(outs.map((o) => o.amount)));
 }
 
 /** + Add Out: every out leaves a numbered OUT receipt. */
@@ -436,34 +448,35 @@ export async function addOut(db: PrismaClient, actor: AuthzUser, scope: Scope, i
   const amount = round2(dec(input.amount));
   if (!amount.greaterThan(0)) throw new ValidationError("Enter the amount");
   if (Number.isNaN(input.paidAt.getTime()) || input.paidAt.getTime() > Date.now() + 86_400_000) throw new ValidationError("Enter a valid date");
-  await assertOpen(db, scope.country, input.paidAt);
+  await assertOpenFor(db, scope.country, { year: scope.year, date: input.paidAt });
   const bank = await db.bank.findUnique({ where: { id: input.bankId } });
   if (!bank?.active) throw new ValidationError("Choose a bank");
   const sentTo = input.sentTo?.trim().slice(0, 160) || null;
+  const sentVia = input.sentVia?.trim().slice(0, 60) || null;
+  const sentAccount = input.sentAccount?.trim().slice(0, 60) || null;
   const forYear = input.forYear ?? null;
   const reference = input.reference?.trim().slice(0, 120) || null;
 
-  // Paid now for an earlier year: it must be a year with an opening balance,
-  // and it comes out of what that year left for this part — once, here.
+  // Paid now for a year before the system (e.g. 2025 W-30): it must have a
+  // typed opening balance, and it comes out of what that year left (its Orbit
+  // profit). A system year (2026 on) is finished before it is closed.
   if (forYear !== null) {
-    if (!Number.isInteger(forYear) || forYear >= scope.year) throw new ValidationError("Choose the year it belongs to");
-    const part = partOfOut(input.category, input.partner);
-    if (!part) throw new ValidationError("This kind of out cannot belong to an earlier year");
-    if (input.category === "PROFIT_PAYOUT" && !input.partner) throw new ValidationError("Choose the partner");
-    const hasYear = await db.openingEntry.findFirst({ where: { country: scope.country, year: scope.year, fromYear: forYear, kind: "TOTAL", reversedAt: null } });
+    if (!Number.isInteger(forYear) || forYear >= scope.year || forYear >= SYSTEM_START_YEAR) throw new ValidationError("Choose the year it belongs to");
+    if (!EARLIER_OUT.includes(input.category)) throw new ValidationError("This kind of out cannot belong to an earlier year");
+    const hasYear = await db.openingEntry.findFirst({ where: { country: scope.country, year: scope.year, fromYear: forYear, kind: "TOTAL", carried: false, reversedAt: null } });
     if (!hasYear) throw new ValidationError("That year has no opening balance");
-    const left = (await earlierYearParts(db, scope, forYear)).find((p) => p.source === part)?.left ?? D0();
-    if (amount.greaterThan(left)) throw new ValidationError("More than what is left from that year for this part");
+    if (amount.greaterThan(await earlierYearLeft(db, scope, forYear))) throw new ValidationError("More than what is left from that year");
   }
 
   if (input.category === "SHIPMENT_COST") {
-    if (forYear !== null && !input.shipmentId) {
-      // An earlier year's shipment that is not in the system (e.g. 2025 W-30).
+    if (forYear !== null) {
+      // An earlier year's shipment is not in the system (e.g. 2025 W-30).
       if (!reference) throw new ValidationError("Enter the shipment, e.g. W-30");
+      if (input.shipmentId) throw new ValidationError("Shipment not found");
     } else {
       if (!input.shipmentId || !input.stage) throw new ValidationError("Choose the shipment and the stage");
       const sh = await db.shipment.findUnique({ where: { id: input.shipmentId } });
-      if (!sh || sh.originCountry !== scope.country || sh.businessYear !== (forYear ?? scope.year)) throw new ValidationError("Shipment not found");
+      if (!sh || sh.originCountry !== scope.country || sh.businessYear !== scope.year) throw new ValidationError("Shipment not found");
       if (input.stage === "TRANSIT" && sh.mode !== "AIR") throw new ValidationError("A container has no transit stage");
     }
   }
@@ -496,7 +509,7 @@ export async function addOut(db: PrismaClient, actor: AuthzUser, scope: Scope, i
       kind: RECEIPT_KIND[input.category],
       amount,
       bankId: bank.id,
-      counterparty: sentTo,
+      counterparty: [sentTo, [sentVia, sentAccount].filter(Boolean).join(" ")].filter(Boolean).join(" — ") || null,
       note: [forNote, input.note?.trim().slice(0, 300)].filter(Boolean).join(" — ") || null,
       actorUserId: actor.id,
       issuedAt: input.paidAt,
@@ -513,6 +526,8 @@ export async function addOut(db: PrismaClient, actor: AuthzUser, scope: Scope, i
         partner: input.category === "PROFIT_PAYOUT" ? input.partner : null,
         bankId: bank.id,
         sentTo,
+        sentVia,
+        sentAccount,
         amount,
         paidAt: input.paidAt,
         note: input.note?.trim().slice(0, 300) || null,
@@ -534,7 +549,7 @@ export async function reverseOut(db: PrismaClient, actor: AuthzUser, outId: stri
   if (!out) throw new ValidationError("Not found");
   requireScope(actor, { country: out.country, businessYear: out.year });
   if (out.reversedAt) return;
-  await assertOpen(db, out.country, out.paidAt);
+  await assertOpenFor(db, out.country, { year: out.year, date: out.paidAt });
   if (out.returns.length) throw new ValidationError("This debt has returns; it cannot be removed");
   const now = new Date();
   await db.$transaction(async (tx) => {
@@ -553,9 +568,9 @@ export async function listDebts(db: PrismaClient, actor: AuthzUser, scope: Scope
     db.openingEntry.findMany({ where: { country: scope.country, year: scope.year, kind: "DEBT", reversedAt: null }, include: { returns: { include: { bank: true } } }, orderBy: { fromYear: "asc" } }),
   ]);
   const all = [
-    ...debts.map((d) => ({ id: d.id, person: d.sentTo ?? "-", date: d.paidAt.toISOString(), fromYear: null as number | null, bank: d.bank.name as string | null, amount: d.amount, returns: d.returns })),
+    ...debts.map((d) => ({ id: d.id, person: d.sentTo ?? "-", note: d.note, date: d.paidAt.toISOString(), fromYear: null as number | null, bank: d.bank.name as string | null, amount: d.amount, returns: d.returns })),
     // Debts brought forward from earlier years (Opening balance → Debt).
-    ...old.map((e) => ({ id: e.id, person: e.person ?? "-", date: new Date(Date.UTC(scope.year, 0, 1)).toISOString(), fromYear: e.fromYear as number | null, bank: null, amount: e.amount, returns: e.returns })),
+    ...old.map((e) => ({ id: e.id, person: e.person ?? "-", note: e.note, date: new Date(Date.UTC(scope.year, 0, 1)).toISOString(), fromYear: e.fromYear as number | null, bank: null, amount: e.amount, returns: e.returns })),
   ];
   const rows = all.map((d) => {
     const returned = sum(d.returns.map((r) => r.amount));
@@ -563,6 +578,7 @@ export async function listDebts(db: PrismaClient, actor: AuthzUser, scope: Scope
     return {
       id: d.id,
       person: d.person,
+      note: d.note,
       date: d.date,
       fromYear: d.fromYear,
       bank: d.bank,
@@ -599,7 +615,7 @@ export async function returnDebt(db: PrismaClient, actor: AuthzUser, input: { de
           : null;
     if (!debt) throw new ValidationError("Not found");
     requireScope(actor, { country: debt.country, businessYear: debt.year });
-    await assertOpen(tx, debt.country, input.returnedAt);
+    await assertOpenFor(tx, debt.country, { year: debt.year, date: input.returnedAt });
     const owed = debt.amount.minus(sum(debt.returns.map((r) => r.amount)));
     if (amount.greaterThan(owed)) throw new ValidationError("More than what is still owed");
     const bank = await tx.bank.findUnique({ where: { id: input.bankId } });
@@ -652,7 +668,7 @@ export async function partnersProfit(db: PrismaClient, actor: AuthzUser, scope: 
   const shares = partnerShares(f.shipments);
   const openSom = openingFor(f, "som");
   const openMah = openingFor(f, "mah");
-  const payouts = (p: Partner) => f.outs.filter((o) => o.category === "PROFIT_PAYOUT" && o.partner === p);
+  const payouts = (p: Partner) => f.outs.filter((o) => o.category === "PROFIT_PAYOUT" && o.partner === p && o.forYear === null);
   const mk = (p: Partner, earned: Prisma.Decimal) => {
     const paid = sum(payouts(p).map((o) => o.amount));
     return { earned: s2(earned), paid: s2(paid), hold: s2(earned.minus(paid)), payouts: payouts(p).map((o) => ({ id: o.id, date: o.paidAt.toISOString(), amount: s2(o.amount), receiptNo: o.receipt.number })) };
@@ -708,7 +724,7 @@ export async function listReceipts(db: PrismaClient, actor: AuthzUser, scope: Sc
       ],
       ...(q ? { AND: [{ OR: [{ number: { contains: q, mode: "insensitive" } }, { counterparty: { contains: q, mode: "insensitive" } }, { customer: { name: { contains: q, mode: "insensitive" } } }] }] } : {}),
     },
-    include: { bank: true, customer: true },
+    include: { bank: true, customer: true, cashOut: { select: { sentTo: true, sentVia: true, sentAccount: true } } },
     orderBy: { issuedAt: "desc" },
     take: 500,
   });
@@ -719,7 +735,9 @@ export async function listReceipts(db: PrismaClient, actor: AuthzUser, scope: Sc
     direction: r.direction,
     kind: r.kind,
     kindLabel: KIND_LABEL[r.kind],
-    party: r.customer ? `${r.customer.ref} — ${r.customer.name}` : r.counterparty ?? "-",
+    party: r.customer ? `${r.customer.ref} — ${r.customer.name}` : r.cashOut?.sentTo ?? r.counterparty ?? "-",
+    // How an out was sent (e.g. "EVC Plus 615123456"); null for older outs and money in.
+    via: [r.cashOut?.sentVia, r.cashOut?.sentAccount].filter(Boolean).join(" ") || null,
     bank: r.bank?.name ?? null,
     amount: s2(r.amount),
     reversed: !!r.reversedAt,
@@ -739,7 +757,7 @@ export async function overview(db: PrismaClient, actor: AuthzUser, scope: Scope)
   scoped(actor, scope);
   const f = await moneyFacts(db, scope);
   const invoices = await db.invoice.findMany({ where: { status: { not: "VOID" }, shipment: { originCountry: scope.country, businessYear: scope.year } } });
-  const closes = await db.periodClose.findMany({ where: { country: scope.country, year: scope.year } });
+  const closes = await db.periodClose.findMany({ where: { country: scope.country, year: scope.year, reopenedAt: null } });
   const periods = (["H1", "H2", "YEAR"] as ClosePeriod[]).map((p) => {
     const { from, to } = periodRange(scope.year, p);
     const inP = (d: Date) => d >= from && d <= to;
@@ -764,25 +782,93 @@ export async function overview(db: PrismaClient, actor: AuthzUser, scope: Scope)
       closedAt: close?.closedAt.toISOString() ?? null,
     };
   });
-  return { periods, opening: s2(f.opening) };
+  const yearClosed = periods.some((p) => p.period === "YEAR" && p.closedAt);
+  return {
+    periods,
+    opening: s2(f.opening),
+    // Closing is for system years only; years before it are opening balances.
+    canClose: scope.year >= SYSTEM_START_YEAR,
+    canReopen: actor.isSuperAdmin && scope.year >= SYSTEM_START_YEAR,
+    yearCheck: yearClosed || scope.year < SYSTEM_START_YEAR ? null : await yearCloseCheck(db, actor, scope),
+  };
 }
 
-/** Close a period: it is locked for Finance and Accounting. Closing the year
- * carries the balance into next year as its opening balance. */
+/** Parts that must be paid out before the year is closed: only Orbit profit stays. */
+const MUST_BE_PAID = ["transfer", "commission", "cost", "som", "mah"];
+
+/**
+ * What stops the year from closing (owner 2026-10-25): every shipment cost,
+ * Somali Transport and Mahad profit, Transfer Money and Commission must be
+ * paid out, so only Orbit profit is left. Customers who still owe are not a
+ * stop: their invoices are carried to next year as debts owed to us.
+ */
+async function yearCloseCheck(db: PrismaClient, actor: AuthzUser, scope: Scope) {
+  const [io, costs, prevOpen] = await Promise.all([
+    incomeAndOut(db, actor, scope),
+    listShipmentCosts(db, actor, scope),
+    scope.year - 1 >= SYSTEM_START_YEAR ? isYearClosed(db, scope.country, scope.year - 1).then((c) => !c) : Promise.resolve(false),
+  ]);
+  const blockers: { key: string; label: string; amount: string; detail: { code: string; amount: string }[] }[] = [];
+  if (prevOpen) blockers.push({ key: "previous", label: "Close the previous year first", amount: "0.00", detail: [] });
+  // Shipment costs still due on their cost sheets (stage by stage).
+  const unpaid = costs.rows
+    .map((r) => ({ code: r.code, left: (["ORIGIN", "TRANSIT", "ARRIVED"] as const).reduce((a, st) => a.add(dec(r.row.stages[st]).minus(dec(r.paid[st])).greaterThan(0) ? dec(r.row.stages[st]).minus(dec(r.paid[st])) : D0()), D0()) }))
+    .filter((r) => r.left.greaterThan(0));
+  if (unpaid.length) blockers.push({ key: "costDue", label: "Shipment costs not paid", amount: s2(sum(unpaid.map((r) => r.left))), detail: unpaid.map((r) => ({ code: r.code, amount: s2(r.left) })) });
+  // Money still held for someone else. (A part below zero is money Orbit put
+  // in from its profit — it is not a stop.)
+  for (const r of io.composition.filter((c) => MUST_BE_PAID.includes(c.key) && dec(c.remaining).greaterThan(0))) {
+    blockers.push({ key: r.key, label: r.label, amount: r.remaining, detail: [] });
+  }
+  const owed = await customersOwing(db, scope);
+  return {
+    blockers,
+    orbitProfit: io.composition.find((c) => c.key === "orbit")?.remaining ?? "0.00",
+    balance: io.balance,
+    customersOwe: { count: owed.length, amount: s2(sum(owed.map((o) => o.amount))) },
+  };
+}
+
+/** Invoices of the year's shipments that customers have not paid in full. */
+async function customersOwing(db: Db, scope: Scope) {
+  const invoices = await db.invoice.findMany({
+    where: { status: { not: "VOID" }, shipment: { originCountry: scope.country, businessYear: scope.year } },
+    include: { customer: { select: { ref: true, name: true } }, shipment: { select: { code: true } } },
+    orderBy: { createdAt: "asc" },
+  });
+  return invoices
+    .map((i) => ({ person: `${i.customer.ref} — ${i.customer.name}`, note: `${displayShipmentCode(i.shipment!.code)} · ${i.number}`, amount: round2(i.total.minus(i.amountAllocated)) }))
+    .filter((i) => i.amount.greaterThan(0));
+}
+
+/**
+ * Close a period: it is locked for Finance and Accounting. January – June
+ * locks what is dated in it. The full year locks everything of the year,
+ * whatever the date, and is allowed only when only Orbit profit is left; next
+ * year then opens with this year's balance, and every debt still owed to us —
+ * customers' unpaid invoices included — is carried as a debt.
+ */
 export async function closePeriod(db: PrismaClient, actor: AuthzUser, scope: Scope, period: ClosePeriod) {
   scoped(actor, scope);
   requirePermission(actor, "accounting:manage");
+  if (scope.year < SYSTEM_START_YEAR) throw new ValidationError("Years before 2026 are opening balances; there is nothing to close");
+  if (period === "H2") throw new ValidationError("July – December is closed with the full year");
   const { from, to } = periodRange(scope.year, period);
-  if (await db.periodClose.findUnique({ where: { country_year_period: { country: scope.country, year: scope.year, period } } })) throw new ValidationError("This period is already closed");
+  if (await db.periodClose.findFirst({ where: { country: scope.country, year: scope.year, period, reopenedAt: null } })) throw new ValidationError("This period is already closed");
+  if (period === "H1" && (await isYearClosed(db, scope.country, scope.year))) throw new ValidationError("This period is already closed");
+  const check = period === "YEAR" ? await yearCloseCheck(db, actor, scope) : null;
+  if (check?.blockers.length) throw new ValidationError("Pay out everything first; only Orbit profit can be left");
   const io = period === "YEAR" ? await incomeAndOut(db, actor, scope) : null;
   const debts = period === "YEAR" ? await listDebts(db, actor, scope) : null;
+  const owing = period === "YEAR" ? await customersOwing(db, scope) : [];
   await db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`close:${scope.country}:${scope.year}`}))`;
     await tx.periodClose.create({ data: { country: scope.country, year: scope.year, period, fromDate: from, toDate: to, actorUserId: actor.id } });
     if (io && debts) {
       // Next year opens with this year's balance: its total, where it is (per
       // bank) and what it is (per source), plus every debt still owed to us.
       const base = { country: scope.country, year: scope.year + 1, fromYear: scope.year, carried: true, actorUserId: actor.id };
-      await reverseYearLines(tx, actor, base.country, base.year, base.fromYear);
+      await reverseCarried(tx, actor, base.country, base.year, base.fromYear);
       const nz = <T extends { amount: Prisma.Decimal }>(xs: T[]) => xs.filter((x) => !x.amount.isZero());
       const total = dec(io.balance);
       const lines = total.isZero()
@@ -791,54 +877,67 @@ export async function closePeriod(db: PrismaClient, actor: AuthzUser, scope: Sco
             { ...base, kind: "TOTAL" as const, amount: total, note: `Closing balance ${scope.year}` },
             ...nz(io.perBank.map((b) => ({ ...base, kind: "BANK" as const, bankId: b.bankId, amount: dec(b.recorded) }))),
             ...nz(io.unbanked ? [{ ...base, kind: "BANK" as const, bankId: null, amount: dec(io.unbanked.recorded) }] : []),
-            ...nz(io.composition.map((r) => ({ ...base, kind: "SOURCE" as const, source: CARRY_SOURCE[r.key]!, amount: dec(r.remaining) }))),
+            // Everything else is paid out, so the whole balance is Orbit profit.
+            { ...base, kind: "SOURCE" as const, source: "PROFIT" as const, amount: total },
           ];
-      const owed = debts.rows.filter((d) => dec(d.owed).greaterThan(0)).map((d) => ({ ...base, kind: "DEBT" as const, source: "DEBT" as const, amount: dec(d.owed), person: d.person }));
+      const owed = [
+        ...debts.rows.filter((d) => dec(d.owed).greaterThan(0)).map((d) => ({ ...base, kind: "DEBT" as const, source: "DEBT" as const, amount: dec(d.owed), person: d.person, note: d.note })),
+        // Customers who still owe on this year's invoices: paid back next year in Debts.
+        ...owing.map((o) => ({ ...base, kind: "DEBT" as const, source: "DEBT" as const, amount: o.amount, person: o.person, note: o.note })),
+      ];
       if (lines.length + owed.length) await tx.openingEntry.createMany({ data: [...lines, ...owed] });
     }
-    await logAudit(tx, { actorUserId: actor.id, action: "accounting.close", entityType: "PeriodClose", metadata: { ...scope, period, carried: io?.balance ?? null } });
+    await logAudit(tx, { actorUserId: actor.id, action: "accounting.close", entityType: "PeriodClose", metadata: { ...scope, period, carried: io?.balance ?? null, customersOwe: owing.length } });
   });
 }
 
-const CARRY_SOURCE: Record<string, Exclude<OpeningSource, "DEBT">> = {
-  transfer: "TRANSFER",
-  commission: "COMMISSION",
-  cost: "SHIPMENT_COST",
-  som: "SOMALI_TRANSPORT",
-  mah: "MAHAD",
-  orbit: "PROFIT",
-};
-
-// ------------------------------------------------------------------ opening balance (earlier years)
-
-/** Parts a year's balance can be split into; the partners only where the country splits profit. */
-const PARTS: Exclude<OpeningSource, "DEBT">[] = ["PROFIT", "TRANSFER", "COMMISSION", "SHIPMENT_COST", "SOMALI_TRANSPORT", "MAHAD", "OTHER"];
-const yearStart = (year: number) => new Date(Date.UTC(year, 0, 1));
-
-async function partsFor(db: Db, country: string) {
-  const splits = await getSplits(db);
-  const s = splits[country];
-  const partners = country === "Turkey" || !!s && [s.AIR, s.SEA].some((x) => x[1] > 0 || x[2] > 0);
-  return PARTS.filter((p) => partners || (p !== "SOMALI_TRANSPORT" && p !== "MAHAD"));
-}
-
-async function isClosedAt(db: Db, country: string, date: Date) {
-  return !!(await db.periodClose.findFirst({ where: { country, fromDate: { lte: date }, toDate: { gte: date } } }));
+/** Reverse every line a year close carried into the next year (kept in History). */
+async function reverseCarried(tx: Prisma.TransactionClient, actor: AuthzUser, country: string, year: number, fromYear: number) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`opening:${country}:${year}:${fromYear}`}))`;
+  await tx.openingEntry.updateMany({ where: { country, year, fromYear, carried: true, reversedAt: null }, data: { reversedAt: new Date(), reversedBy: actor.id } });
 }
 
 /**
+ * Reopen a closed period (Super Admin only, system years). Reopening the full
+ * year takes back what it carried into the next year; it is refused once the
+ * next year is closed or has used a carried debt.
+ */
+export async function reopenPeriod(db: PrismaClient, actor: AuthzUser, scope: Scope, period: ClosePeriod) {
+  scoped(actor, scope);
+  if (!actor.isSuperAdmin) throw new AuthorizationError("Only a Super Admin can reopen a closed period");
+  if (scope.year < SYSTEM_START_YEAR) throw new ValidationError("Years before 2026 are opening balances; there is nothing to close");
+  await db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`close:${scope.country}:${scope.year}`}))`;
+    const close = await tx.periodClose.findFirst({ where: { country: scope.country, year: scope.year, period, reopenedAt: null } });
+    if (!close) throw new ValidationError("This period is not closed");
+    if (period === "H1" && (await isYearClosed(tx, scope.country, scope.year))) throw new ValidationError("Reopen the full year first");
+    if (period === "YEAR") {
+      if (await isYearClosed(tx, scope.country, scope.year + 1)) throw new ValidationError("Reopen the next year first");
+      const used = await tx.openingEntry.count({ where: { country: scope.country, year: scope.year + 1, fromYear: scope.year, carried: true, reversedAt: null, returns: { some: {} } } });
+      if (used) throw new ValidationError("Money was already returned next year on a debt carried from this year");
+      await reverseCarried(tx, actor, scope.country, scope.year + 1, scope.year);
+    }
+    await tx.periodClose.update({ where: { id: close.id }, data: { reopenedAt: new Date(), reopenedBy: actor.id } });
+    await logAudit(tx, { actorUserId: actor.id, action: "accounting.reopen", entityType: "PeriodClose", entityId: close.id, metadata: { ...scope, period } });
+  });
+}
+
+// ------------------------------------------------------------------ opening balance (earlier years)
+
+const yearStart = (year: number) => new Date(Date.UTC(year, 0, 1));
+
+/**
  * Opening balance of the year: for every earlier year, the balance typed
- * first, then the banks it is in and the parts it is made of — only what was
- * typed. Then "brought forward + this year = now".
+ * first, then the banks it is in. The money is Orbit profit (owner
+ * 2026-10-25). Then "brought forward + this year = now".
  */
 export async function listOpening(db: PrismaClient, actor: AuthzUser, scope: Scope) {
   scoped(actor, scope);
-  const [entries, legacy, banks, locked, parts] = await Promise.all([
+  const [entries, legacy, banks, locked] = await Promise.all([
     db.openingEntry.findMany({ where: { country: scope.country, year: scope.year }, include: { bank: true, returns: true }, orderBy: [{ fromYear: "desc" }, { createdAt: "asc" }] }),
     db.openingBalance.findUnique({ where: { country_year: { country: scope.country, year: scope.year } } }),
     db.bank.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),
-    isClosedAt(db, scope.country, yearStart(scope.year)),
-    partsFor(db, scope.country),
+    isClosed(db, scope.country, yearStart(scope.year)).then(async (c) => c || isYearClosed(db, scope.country, scope.year)),
   ]);
   const live = entries.filter((e) => !e.reversedAt);
   // Outs paid this year for an earlier year (e.g. 2025 shipment W-30).
@@ -848,14 +947,15 @@ export async function listOpening(db: PrismaClient, actor: AuthzUser, scope: Sco
     const L = live.filter((e) => e.fromYear === fy);
     const total = L.find((e) => e.kind === "TOTAL");
     const paidFor = later.filter((o) => o.forYear === fy);
-    const paidOf = (p: OpeningSource) => sum(paidFor.filter((o) => partOfOut(o.category, o.partner) === p).map((o) => o.amount));
+    const paid = sum(paidFor.map((o) => o.amount));
     return {
       fromYear: fy,
       total: total ? s2(total.amount) : null,
       carried: !!total?.carried,
       note: total?.note ?? null,
       banks: L.filter((e) => e.kind === "BANK").map((e) => ({ bankId: e.bankId, bank: e.bank?.name ?? null, amount: s2(e.amount) })),
-      parts: L.filter((e) => e.kind === "SOURCE").map((e) => ({ source: e.source!, amount: s2(e.amount), paid: s2(paidOf(e.source!)), left: s2(e.amount.minus(paidOf(e.source!))) })),
+      // What that year left (Orbit profit) after what was paid for it this year.
+      left: total ? s2(total.amount.minus(paid)) : null,
       paidAfter: paidFor.map((o) => ({
         id: o.id,
         date: o.paidAt.toISOString(),
@@ -867,7 +967,7 @@ export async function listOpening(db: PrismaClient, actor: AuthzUser, scope: Sco
         receiptNo: o.receipt.number,
         amount: s2(o.amount),
       })),
-      paidTotal: s2(sum(paidFor.map((o) => o.amount))),
+      paidTotal: s2(paid),
       debts: L.filter((e) => e.kind === "DEBT").map((e) => ({ id: e.id, person: e.person ?? "-", amount: s2(e.amount), returned: s2(sum(e.returns.map((r) => r.amount))), note: e.note, carried: e.carried, hasReturns: e.returns.length > 0 })),
     };
   });
@@ -890,8 +990,8 @@ export async function listOpening(db: PrismaClient, actor: AuthzUser, scope: Sco
       reversed: !!e.reversedAt,
     })),
     locked,
-    parts,
     banks: banks.map((b) => ({ id: b.id, name: b.name })),
+    systemStart: SYSTEM_START_YEAR,
   };
 }
 
@@ -901,8 +1001,10 @@ const money2 = (v: string, msg: string) => {
   if (!/^-?\d{1,10}(\.\d{1,2})?$/.test(raw)) throw new ValidationError(msg);
   return round2(dec(raw));
 };
+/** Only years before the system are typed; later years are carried when they are closed. */
 const checkFromYear = (scope: Scope, fromYear: number) => {
   if (!Number.isInteger(fromYear) || fromYear >= scope.year || fromYear < scope.year - 30) throw new ValidationError("Choose the year it came from");
+  if (fromYear >= SYSTEM_START_YEAR) throw new ValidationError("This year is carried automatically when it is closed");
 };
 
 /** Reverse an earlier year's TOTAL / BANK / SOURCE lines (debts are kept). */
@@ -919,20 +1021,18 @@ export interface OpeningYearInput {
   total: string;
   /** Where it is: must add up to the total. */
   banks: { bankId: string; amount: string }[];
-  /** What it is: must add up to the total. */
-  parts: { source: OpeningSource; amount: string }[];
   note?: string;
 }
 
 /**
- * Save an earlier year: its balance, the banks it is in and the parts it is
- * made of. Both splits must equal the balance. Saving again replaces the year
- * (the old lines are reversed and kept in the history).
+ * Save an earlier year: its balance and the banks it is in (they must equal
+ * the balance). The whole balance is Orbit profit (owner 2026-10-25). Saving
+ * again replaces the year (the old lines are reversed and kept in the history).
  */
 export async function saveOpeningYear(db: PrismaClient, actor: AuthzUser, scope: Scope, input: OpeningYearInput) {
   scoped(actor, scope);
   requirePermission(actor, "accounting:manage");
-  await assertOpen(db, scope.country, yearStart(scope.year));
+  await assertOpenFor(db, scope.country, { year: scope.year, date: yearStart(scope.year) });
   checkFromYear(scope, input.fromYear);
   const total = money2(input.total, "Enter the year's balance");
   if (total.isZero()) throw new ValidationError("Enter the year's balance");
@@ -942,11 +1042,6 @@ export async function saveOpeningYear(db: PrismaClient, actor: AuthzUser, scope:
   if (banks.some((b) => !active.some((a) => a.id === b.bankId)) || new Set(banks.map((b) => b.bankId)).size !== banks.length) throw new ValidationError("Choose a bank");
   if (!sum(banks.map((b) => b.amount)).equals(total)) throw new ValidationError("The banks must add up to the year's balance");
 
-  const allowed = await partsFor(db, scope.country);
-  const parts = input.parts.map((p) => ({ source: p.source, amount: money2(p.amount, "Enter the amounts") })).filter((p) => !p.amount.isZero());
-  if (parts.some((p) => !allowed.includes(p.source as Exclude<OpeningSource, "DEBT">)) || new Set(parts.map((p) => p.source)).size !== parts.length) throw new ValidationError("Choose where it came from");
-  if (!sum(parts.map((p) => p.amount)).equals(total)) throw new ValidationError("The parts must add up to the year's balance");
-
   const note = input.note?.trim().slice(0, 300) || null;
   await db.$transaction(async (tx) => {
     const replaced = await reverseYearLines(tx, actor, scope.country, scope.year, input.fromYear);
@@ -955,14 +1050,14 @@ export async function saveOpeningYear(db: PrismaClient, actor: AuthzUser, scope:
       data: [
         { ...base, kind: "TOTAL", amount: total, note },
         ...banks.map((b) => ({ ...base, kind: "BANK" as const, bankId: b.bankId, amount: b.amount })),
-        ...parts.map((p) => ({ ...base, kind: "SOURCE" as const, source: p.source, amount: p.amount })),
+        { ...base, kind: "SOURCE", source: "PROFIT", amount: total },
       ],
     });
     await logAudit(tx, {
       actorUserId: actor.id,
       action: "accounting.opening_year",
       entityType: "OpeningEntry",
-      metadata: { ...scope, fromYear: input.fromYear, total: total.toString(), banks: banks.map((b) => [b.bankId, b.amount.toString()]), parts: parts.map((p) => [p.source, p.amount.toString()]), replaced: replaced.length },
+      metadata: { ...scope, fromYear: input.fromYear, total: total.toString(), banks: banks.map((b) => [b.bankId, b.amount.toString()]), replaced: replaced.length },
     });
   });
 }
@@ -971,7 +1066,7 @@ export async function saveOpeningYear(db: PrismaClient, actor: AuthzUser, scope:
 export async function removeOpeningYear(db: PrismaClient, actor: AuthzUser, scope: Scope, fromYear: number) {
   scoped(actor, scope);
   requirePermission(actor, "accounting:manage");
-  await assertOpen(db, scope.country, yearStart(scope.year));
+  await assertOpenFor(db, scope.country, { year: scope.year, date: yearStart(scope.year) });
   checkFromYear(scope, fromYear);
   await db.$transaction(async (tx) => {
     const old = await reverseYearLines(tx, actor, scope.country, scope.year, fromYear);
@@ -983,7 +1078,7 @@ export async function removeOpeningYear(db: PrismaClient, actor: AuthzUser, scop
 export async function addOpeningDebt(db: PrismaClient, actor: AuthzUser, scope: Scope, input: { fromYear: number; amount: string; person: string; note?: string }) {
   scoped(actor, scope);
   requirePermission(actor, "accounting:manage");
-  await assertOpen(db, scope.country, yearStart(scope.year));
+  await assertOpenFor(db, scope.country, { year: scope.year, date: yearStart(scope.year) });
   checkFromYear(scope, input.fromYear);
   const amount = money2(input.amount, "Enter the amount");
   if (!amount.greaterThan(0)) throw new ValidationError("A debt owed to us is a positive amount");
@@ -1004,9 +1099,11 @@ export async function reverseOpening(db: PrismaClient, actor: AuthzUser, id: str
   requirePermission(actor, "accounting:manage");
   const e = await db.openingEntry.findUnique({ where: { id }, include: { returns: true } });
   if (!e || e.kind !== "DEBT") throw new ValidationError("Not found");
+  // A carried debt belongs to the closed year; it changes only by reopening that year.
+  if (e.carried) throw new ValidationError("A carried debt cannot be removed");
   requireScope(actor, { country: e.country, businessYear: e.year });
   if (e.reversedAt) return;
-  await assertOpen(db, e.country, yearStart(e.year));
+  await assertOpenFor(db, e.country, { year: e.year, date: yearStart(e.year) });
   if (e.returns.length) throw new ValidationError("This debt has returns; it cannot be removed");
   await db.$transaction(async (tx) => {
     await tx.openingEntry.update({ where: { id }, data: { reversedAt: new Date(), reversedBy: actor.id } });
@@ -1023,16 +1120,10 @@ export async function outFormOptions(db: PrismaClient, actor: AuthzUser, scope: 
     db.bank.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),
     partnersProfit(db, actor, scope),
   ]);
-  // Earlier years with an opening balance: what each part still has left, and
-  // that year's shipments when they are in the system (2026 onward).
-  const years = await db.openingEntry.findMany({ where: { country: scope.country, year: scope.year, kind: "TOTAL", reversedAt: null }, orderBy: { fromYear: "desc" } });
-  const earlierYears = await Promise.all(
-    years.map(async (y) => ({
-      fromYear: y.fromYear,
-      parts: (await earlierYearParts(db, scope, y.fromYear)).map((p) => ({ source: p.source, left: s2(p.left) })),
-      shipments: (await shipmentFacts(db, { country: scope.country, year: y.fromYear })).map((s) => ({ id: s.id, code: s.code, mode: s.mode, due: s.row.stages, paid: s.paid })),
-    })),
-  );
+  // Years before the system with a typed opening balance: what each still has
+  // left. (A system year is finished before it is closed.)
+  const years = await db.openingEntry.findMany({ where: { country: scope.country, year: scope.year, kind: "TOTAL", carried: false, fromYear: { lt: SYSTEM_START_YEAR }, reversedAt: null }, orderBy: { fromYear: "desc" } });
+  const earlierYears = await Promise.all(years.map(async (y) => ({ fromYear: y.fromYear, left: s2(await earlierYearLeft(db, scope, y.fromYear)) })));
   return {
     year: scope.year,
     shipments: shipments.map((s) => ({ id: s.id, code: s.code, mode: s.mode, due: s.row.stages, paid: s.paid })),

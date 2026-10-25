@@ -3,9 +3,10 @@
 import { cookies } from "next/headers";
 import { z } from "zod";
 import { prisma } from "@/db/client";
+import { ValidationError } from "@/lib/errors";
 import { requireUser } from "@/modules/authz/session";
 import { PIN_COOKIE, setPin, unlockWithPin } from "@/modules/accounting/pin";
-import { addOpeningDebt, addOut, closePeriod, removeOpeningYear, returnDebt, reverseOpening, reverseOut, saveCashCount, saveCostSheet, saveOpeningYear } from "@/modules/accounting/service";
+import { addOpeningDebt, addOut, closePeriod, removeOpeningYear, reopenPeriod, returnDebt, reverseOpening, reverseOut, saveCashCount, saveCostSheet, saveOpeningYear } from "@/modules/accounting/service";
 import { getAdminScope } from "../scope";
 import { runAction } from "../runAction";
 import { requireUnlocked } from "./gate";
@@ -68,6 +69,8 @@ const outForm = z.object({
   bankId: id,
   paidAt: day,
   sentTo: z.string().trim().max(160).optional(),
+  sentVia: z.string().trim().max(60).optional(),
+  sentAccount: z.string().trim().max(60).optional(),
   note: z.string().trim().max(300).optional(),
   shipmentId: id.optional().or(z.literal("").transform(() => undefined)),
   stage: z.enum(["ORIGIN", "TRANSIT", "ARRIVED"]).optional().or(z.literal("").transform(() => undefined)),
@@ -84,7 +87,11 @@ export async function addOutAction(values: OutFormValues) {
     async () => {
       const user = await requireUnlocked();
       const scope = await getAdminScope(user);
-      return addOut(prisma, user, scope, outForm.parse(values));
+      const v = outForm.parse(values);
+      // Every out says who it went to and how (owner 2026-10-25).
+      if (!v.sentTo) throw new ValidationError(v.category === "DEBT" ? "Enter who took the money" : "Enter who it was sent to");
+      if (!v.sentVia) throw new ValidationError("Choose how it was sent");
+      return addOut(prisma, user, scope, v);
     },
     paths,
   );
@@ -136,13 +143,24 @@ export async function closePeriodAction(period: string) {
   );
 }
 
+/** Super Admin only (checked in the service): reopen a closed period of 2026 onward. */
+export async function reopenPeriodAction(period: string) {
+  return runAction(
+    "accounting",
+    async () => {
+      const user = await requireUnlocked();
+      const scope = await getAdminScope(user);
+      await reopenPeriod(prisma, user, scope, z.enum(["H1", "YEAR"]).parse(period));
+    },
+    paths,
+  );
+}
+
 const money = z.string().trim().max(20);
-const source = z.enum(["PROFIT", "TRANSFER", "COMMISSION", "SOMALI_TRANSPORT", "MAHAD", "SHIPMENT_COST", "OTHER"]);
 const openingYear = z.object({
   fromYear: z.coerce.number().int(),
   total: money,
   banks: z.array(z.object({ bankId: id, amount: money })).max(30),
-  parts: z.array(z.object({ source, amount: money })).max(10),
   note: z.string().trim().max(300).optional(),
 });
 export type OpeningYearValues = z.input<typeof openingYear>;

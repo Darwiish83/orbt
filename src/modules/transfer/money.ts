@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient, TransferKind, TransferSendStatus, TransferTag } from "@prisma/client";
+import { assertYearOpen } from "@/modules/accounting/periods";
 import { AuthorizationError, ValidationError } from "@/lib/errors";
 import { logAudit } from "@/modules/audit/log";
 import { can, requirePermission, type AuthzUser } from "@/modules/authz/core";
@@ -54,6 +55,8 @@ export interface ReportRow {
   description: string;
   tag: TransferTag | null;
   handed: boolean;
+  /** The live Receipt Voucher made for this row, if any. */
+  receipt: { id: string; number: number } | null;
   sent: null | { sentAt: string; amount: string; fee: string; delivered: string; currency: string; status: TransferSendStatus };
 }
 
@@ -61,7 +64,11 @@ export interface ReportRow {
 export async function monthReport(db: PrismaClient, actor: AuthzUser, input: { country: string; year: number; kind: TransferKind; month?: number }, now = new Date()) {
   const access = await inCountry(db, actor, input.country);
   const [rows, opened] = await Promise.all([
-    db.moneyTransferRow.findMany({ where: { country: input.country, year: input.year, kind: input.kind, deletedAt: null }, orderBy: [{ receivedAt: "asc" }, { createdAt: "asc" }] }),
+    db.moneyTransferRow.findMany({
+      where: { country: input.country, year: input.year, kind: input.kind, deletedAt: null },
+      include: { receipts: { where: { voidedAt: null }, select: { id: true, number: true } } },
+      orderBy: [{ receivedAt: "asc" }, { createdAt: "asc" }],
+    }),
     db.transferMonth.findMany({ where: { country: input.country, year: input.year } }),
   ]);
   // Months shown: up to the current month (whole year for past years), plus any opened or used.
@@ -84,6 +91,7 @@ export async function monthReport(db: PrismaClient, actor: AuthzUser, input: { c
         description: r.description,
         tag: r.tag,
         handed: !!r.handedAt,
+        receipt: r.receipts[0] ?? null,
         sent:
           r.sentAmount && r.sentAt && r.sentStatus
             ? { sentAt: r.sentAt.toISOString().slice(0, 10), amount: s2(r.sentAmount), fee: s2(f), delivered: s2(r.sentAmount.minus(f)), currency: r.sentCurrency ?? r.currency, status: r.sentStatus }
@@ -141,6 +149,7 @@ function checkReceive(input: ReceiveInput) {
 export async function addReceive(db: PrismaClient, actor: AuthzUser, input: ReceiveInput) {
   requirePermission(actor, "transfer:receive");
   await inCountry(db, actor, input.country);
+  await assertYearOpen(db, input.country, input.year);
   const v = checkReceive(input);
   const row = await db.moneyTransferRow.create({
     data: { country: input.country, year: input.year, month: v.month, kind: input.kind, receivedAt: v.date, amount: v.amount, feePct: v.feePct, currency: input.currency, description: v.description, tag: v.tag, receiverUserId: actor.id },
@@ -153,6 +162,8 @@ async function loadRow(db: PrismaClient, actor: AuthzUser, id: string) {
   const row = await db.moneyTransferRow.findUnique({ where: { id } });
   if (!row || row.deletedAt) throw new ValidationError("Not found");
   await inCountry(db, actor, row.country);
+  // Money received counts in the year's balance: a closed year is locked.
+  await assertYearOpen(db, row.country, row.year);
   return row;
 }
 
@@ -202,6 +213,7 @@ export async function deleteReceive(db: PrismaClient, actor: AuthzUser, id: stri
   requirePermission(actor, "transfer:receive");
   const row = await loadRow(db, actor, id);
   if (row.sentAmount) throw new ValidationError("Delete the transfer side first");
+  if (await db.transferReceipt.count({ where: { transferRowId: id, voidedAt: null } })) throw new ValidationError("Void its receipt first");
   await db.moneyTransferRow.update({ where: { id }, data: { deletedAt: new Date() } });
   await logAudit(db, { actorUserId: actor.id, action: "transfer.receive_delete", entityType: "MoneyTransferRow", entityId: id });
 }

@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient, Shipment, ShipmentLine } from "@prisma/client";
 import { ValidationError } from "@/lib/errors";
+import { assertYearOpen } from "@/modules/accounting/periods";
 import { logAudit } from "@/modules/audit/log";
 import { displayShipmentCode } from "@/modules/authz/adminScope";
 import { requirePermission, requireScope, type AuthzUser } from "@/modules/authz/core";
@@ -21,6 +22,14 @@ async function scoped(db: PrismaClient | Prisma.TransactionClient, actor: AuthzU
   const sh = await db.shipment.findUnique({ where: { id: shipmentId }, include: { airDetail: true, seaDetail: true } });
   if (!sh) throw new ValidationError("Shipment not found");
   requireScope(actor, { country: sh.originCountry, businessYear: sh.businessYear });
+  return sh;
+}
+
+/** Like scoped, for a change: a closed business year's shipments are locked
+ * (their lines and weights decide the year's cost and profit). */
+async function writable(db: PrismaClient | Prisma.TransactionClient, actor: AuthzUser, shipmentId: string, permission: Parameters<typeof requirePermission>[1]) {
+  const sh = await scoped(db, actor, shipmentId, permission);
+  await assertYearOpen(db, sh.originCountry, sh.businessYear);
   return sh;
 }
 
@@ -209,7 +218,7 @@ export interface UpdateShipmentInput {
 /** Edit Shipment. Mode, country and year are fixed once created (they define
  * the W-n / C-n number); status is changed in Operations. */
 export async function updateShipment(db: PrismaClient, actor: AuthzUser, shipmentId: string, input: UpdateShipmentInput) {
-  const sh = await scoped(db, actor, shipmentId, "shipments:write");
+  const sh = await writable(db, actor, shipmentId, "shipments:write");
   if (input.shipDate && input.arrivalDate && input.arrivalDate < input.shipDate) {
     throw new ValidationError("Arrival cannot be before the shipment date");
   }
@@ -238,7 +247,7 @@ export async function updateShipment(db: PrismaClient, actor: AuthzUser, shipmen
 
 /** AWB KG (Air): the airline's weight, typed in on the shipment detail. */
 export async function setAwbKg(db: PrismaClient, actor: AuthzUser, shipmentId: string, awbKg: string | null) {
-  const sh = await scoped(db, actor, shipmentId, "shipments:write");
+  const sh = await writable(db, actor, shipmentId, "shipments:write");
   if (sh.mode !== "AIR") throw new ValidationError("AWB KG applies to air shipments");
   const v = awbKg === null || awbKg === "" ? null : dec(awbKg);
   if (v && v.isNegative()) throw new ValidationError("AWB KG cannot be negative");
@@ -251,7 +260,7 @@ export async function setAwbKg(db: PrismaClient, actor: AuthzUser, shipmentId: s
  * by mistake). Anything with customers, invoices or movement history is kept.
  */
 export async function deleteShipment(db: PrismaClient, actor: AuthzUser, shipmentId: string) {
-  const sh = await scoped(db, actor, shipmentId, "shipments:manage");
+  const sh = await writable(db, actor, shipmentId, "shipments:manage");
   const [lines, invoices, events] = await Promise.all([
     db.shipmentLine.count({ where: { shipmentId } }),
     db.invoice.count({ where: { shipmentId } }),
@@ -286,7 +295,7 @@ function checkLine(mode: Shipment["mode"], input: Partial<ShipmentLineInput>) {
 export async function updateShipmentLine(db: PrismaClient, actor: AuthzUser, lineId: string, input: Omit<ShipmentLineInput, "customerId">) {
   const line = await db.shipmentLine.findUnique({ where: { id: lineId } });
   if (!line) throw new ValidationError("Line not found");
-  const sh = await scoped(db, actor, line.shipmentId, "shipments:write");
+  const sh = await writable(db, actor, line.shipmentId, "shipments:write");
   checkLine(sh.mode, input);
   return db.$transaction(async (tx) => {
     const updated = await tx.shipmentLine.update({
@@ -323,7 +332,7 @@ export async function updateShipmentLine(db: PrismaClient, actor: AuthzUser, lin
 export async function deleteShipmentLine(db: PrismaClient, actor: AuthzUser, lineId: string) {
   const line = await db.shipmentLine.findUnique({ where: { id: lineId } });
   if (!line) throw new ValidationError("Line not found");
-  await scoped(db, actor, line.shipmentId, "shipments:write");
+  await writable(db, actor, line.shipmentId, "shipments:write");
   const [others, invoiced] = await Promise.all([
     db.shipmentLine.count({ where: { shipmentId: line.shipmentId, customerId: line.customerId, id: { not: lineId } } }),
     db.invoice.count({ where: { shipmentId: line.shipmentId, customerId: line.customerId, status: { not: "VOID" } } }),

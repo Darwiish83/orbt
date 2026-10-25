@@ -10,7 +10,7 @@ export const metadata = { title: "Set up two-factor" };
 
 export default async function MfaSetupPage() {
   const user = await getSessionUser();
-  if (!user) redirect("/admin/login");
+  if (!user) redirect("/login");
   if (user.mfaEnabled) redirect("/dashboard");
 
   const { secret, otpauthUri } = await getOrStartSetup(prisma, user.id, user.email);

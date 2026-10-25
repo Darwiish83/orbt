@@ -1,12 +1,23 @@
 import type { Payment, PaymentMethod, Prisma, PrismaClient } from "@prisma/client";
 import { ValidationError } from "@/lib/errors";
 import { logAudit } from "@/modules/audit/log";
+import { isYearClosed } from "@/modules/accounting/periods";
 import { requirePermission, type AuthzUser } from "@/modules/authz/core";
 import { recomputeInvoice } from "./invoices";
 import { issueReceipt } from "./receipts";
 import { dec, gt, round2, sum } from "./money";
 
 type TxClient = Prisma.TransactionClient;
+
+/** A closed business year cannot change: its shipments' invoices take no new
+ * or reversed payments (owner 2026-10-25). Unpaid invoices were carried to
+ * next year as debts, paid back in Accounting → Debts. */
+async function assertInvoiceYearOpen(tx: TxClient, invoiceId: string) {
+  const inv = await tx.invoice.findUnique({ where: { id: invoiceId }, select: { shipment: { select: { originCountry: true, businessYear: true } } } });
+  if (inv?.shipment && (await isYearClosed(tx, inv.shipment.originCountry, inv.shipment.businessYear))) {
+    throw new ValidationError("This year is closed. Record the payment in Accounting → Debts.");
+  }
+}
 
 export interface AllocationInput {
   invoiceId: string;
@@ -84,6 +95,7 @@ export async function recordPaymentTx(tx: TxClient, actor: AuthzUser, input: Rec
       throw new ValidationError("Payment currency does not match the invoice currency");
     }
     if (invoice.status === "VOID") throw new ValidationError("Cannot allocate to a void invoice");
+    await assertInvoiceYearOpen(tx, invoice.id);
     const balance = round2(invoice.total.minus(invoice.amountAllocated));
     if (gt(dec(a.amount), balance)) {
       throw new ValidationError("Allocation exceeds the invoice balance");
@@ -184,6 +196,7 @@ export async function reversePaymentTx(
     include: { allocations: true },
   });
   if (payment.reversedAt) return payment;
+  for (const a of payment.allocations) await assertInvoiceYearOpen(tx, a.invoiceId);
 
   const now = new Date();
   const updated = await tx.payment.update({

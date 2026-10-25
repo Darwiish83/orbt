@@ -41,16 +41,22 @@ async function checkPassword(user: User | null | undefined, password: string): P
 }
 
 /**
- * Customer sign-in (ADR-016): Customer Reference + password. The customer must
- * be ACTIVE and have an activated portal account. Constant-ish timing: a hash
- * verification always runs.
+ * Customer sign-in (ADR-016, ADR-021): Customer Reference + the account email
+ * ("Gmail") + password. The customer must be ACTIVE and have an activated
+ * portal account. Constant-ish timing: a hash verification always runs.
  */
-export async function verifyCustomerLogin(db: PrismaClient, reference: string, password: string): Promise<User | null> {
+export async function verifyCustomerLogin(
+  db: PrismaClient,
+  reference: string,
+  email: string,
+  password: string,
+): Promise<User | null> {
   const customer = await db.customer.findFirst({
     where: { ref: { equals: normId(reference), mode: "insensitive" } },
     select: { status: true, user: true },
   });
-  return checkPassword(customer?.status === "ACTIVE" ? customer.user : null, password);
+  const user = customer?.status === "ACTIVE" ? customer.user : null;
+  return checkPassword(user && user.email === email.trim().toLowerCase() ? user : null, password);
 }
 
 /**

@@ -97,7 +97,7 @@ export async function getAdminReport(
   const shipWhere: Prisma.ShipmentWhereInput = { businessYear: opts.year, ...(countries ? { originCountry: { in: countries } } : {}) };
   const [shipments, invoices, customers, activeCustomers] = await Promise.all([
     db.shipment.findMany({ where: shipWhere, include: { lines: true } }),
-    db.invoice.findMany({ where: { status: { not: "VOID" }, shipment: shipWhere }, select: { total: true, amountAllocated: true, createdAt: true, issuedAt: true } }),
+    db.invoice.findMany({ where: { status: { not: "VOID" }, shipment: shipWhere }, select: { total: true, amountAllocated: true, createdAt: true, issuedAt: true, shipment: { select: { originCountry: true } } } }),
     db.customer.count(),
     db.customer.count({ where: { status: "ACTIVE" } }),
   ]);
@@ -123,6 +123,15 @@ export async function getAdminReport(
     ).toString();
   }
   const statuses: ShipmentStatus[] = ["AT_ORIGIN_STORE", "DEPARTED", "IN_TRANSIT", "ARRIVED"];
+  const packagesOf = (mode: "AIR" | "SEA") => shipments.filter((s) => s.mode === mode).flatMap((s) => s.lines).reduce((n, l) => n + (l.packages ?? 0) + (l.mixCount ?? 0), 0);
+  // One line per country (the company report covers several).
+  const byCountry = [...new Set(shipments.map((s) => s.originCountry))].sort().map((c) => {
+    const inv = invoices.filter((i) => i.shipment?.originCountry === c);
+    const rev = round2(inv.reduce((a, i) => a.add(i.total), dec(0)));
+    const col = round2(inv.reduce((a, i) => a.add(i.amountAllocated), dec(0)));
+    const sh = shipments.filter((s) => s.originCountry === c);
+    return { country: c, shipments: sh.length, air: sh.filter((s) => s.mode === "AIR").length, sea: sh.filter((s) => s.mode === "SEA").length, revenue: rev.toString(), collected: col.toString(), outstanding: round2(rev.minus(col)).toString() };
+  });
   return {
     section: opts.section,
     year: opts.year,
@@ -134,6 +143,8 @@ export async function getAdminReport(
       kg: measure("AIR"),
       cbm: measure("SEA"),
       packages: shipments.flatMap((s) => s.lines).reduce((n, l) => n + (l.packages ?? 0) + (l.mixCount ?? 0), 0),
+      packagesAir: packagesOf("AIR"),
+      packagesSea: packagesOf("SEA"),
       revenue: revenue.toString(),
       collected: collected.toString(),
       outstanding: round2(revenue.minus(collected)).toString(),
@@ -143,5 +154,7 @@ export async function getAdminReport(
     },
     status: statuses.map((st) => ({ status: st, count: shipments.filter((s) => s.status === st).length })),
     monthly,
+    byCountry,
+    generatedAt: new Date().toISOString(),
   };
 }

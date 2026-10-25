@@ -5,6 +5,9 @@ export type { SegOption, SegProps, SearchBoxProps, DateFieldProps } from "./cont
 export { DataTable } from "./DataTable";
 export type { DataColumn, DataTableProps } from "./DataTable";
 export { ReceiptPaper, ReceiptSheet } from "./Receipt";
+export { Signature, Stamp, StampAndSign } from "./Stamp";
+export { TransferReceiptPaper } from "./TransferReceiptPaper";
+export type { TransferReceiptPaperData } from "./TransferReceiptPaper";
 export { InvoicePaper } from "./InvoicePaper";
 export type { InvoicePaperData, PaperCompany } from "./InvoicePaper";
 export type { ReceiptData } from "./Receipt";

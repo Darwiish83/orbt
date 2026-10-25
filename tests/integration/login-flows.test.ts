@@ -51,21 +51,22 @@ async function staffUser(code: string, opts: { active?: boolean; email?: string;
 
 // ------------------------------------------------------------- sign-in
 
-describe("customer sign-in: Reference + password", () => {
+describe("customer sign-in: Reference + Gmail + password", () => {
   it("accepts the right Reference (any case) and password", async () => {
     const { u } = await activeCustomerUser("OR-3001");
-    expect((await verifyCustomerLogin(prisma, "or-3001 ", "cust-pass-123"))?.id).toBe(u.id);
+    expect((await verifyCustomerLogin(prisma, "or-3001 ", " OR-3001@shop.so", "cust-pass-123"))?.id).toBe(u.id);
   });
 
-  it("refuses a wrong password, an unknown or suspended customer, and an account with no password yet", async () => {
+  it("refuses a wrong password or Gmail, an unknown or suspended customer, and an account with no password yet", async () => {
     await activeCustomerUser("OR-3001");
-    expect(await verifyCustomerLogin(prisma, "OR-3001", "nope-nope")).toBeNull();
-    expect(await verifyCustomerLogin(prisma, "OR-9999", "cust-pass-123")).toBeNull();
+    expect(await verifyCustomerLogin(prisma, "OR-3001", "or-3001@shop.so", "nope-nope")).toBeNull();
+    expect(await verifyCustomerLogin(prisma, "OR-3001", "else@shop.so", "cust-pass-123")).toBeNull();
+    expect(await verifyCustomerLogin(prisma, "OR-9999", "or-9999@shop.so", "cust-pass-123")).toBeNull();
     await prisma.customer.update({ where: { ref: "OR-3001" }, data: { status: "SUSPENDED" } });
-    expect(await verifyCustomerLogin(prisma, "OR-3001", "cust-pass-123")).toBeNull();
+    expect(await verifyCustomerLogin(prisma, "OR-3001", "or-3001@shop.so", "cust-pass-123")).toBeNull();
     const c = await customer("OR-3002");
     await prisma.user.create({ data: { email: "invited@shop.so", status: "INVITED", customerId: c.id } });
-    expect(await verifyCustomerLogin(prisma, "OR-3002", "anything12")).toBeNull();
+    expect(await verifyCustomerLogin(prisma, "OR-3002", "invited@shop.so", "anything12")).toBeNull();
   });
 });
 
@@ -98,7 +99,7 @@ describe("customer first login / forgot password (Reference + Phone + Email → 
     const token = await verifyCustomerAccess(prisma, { email: "amina@shop.so", code: lastCode() });
     const done = await completeSetPassword(prisma, { token, password: "new-pass-123", confirm: "new-pass-123" });
     expect(done.customerRef).toBe("OR-3001");
-    expect((await verifyCustomerLogin(prisma, "OR-3001", "new-pass-123"))?.id).toBe(user.id);
+    expect((await verifyCustomerLogin(prisma, "OR-3001", "amina@shop.so", "new-pass-123"))?.id).toBe(user.id);
     // The set-password token is single-use.
     await expect(completeSetPassword(prisma, { token, password: "again-123", confirm: "again-123" })).rejects.toThrow(/expired/i);
   });
@@ -197,7 +198,7 @@ describe("customer self-registration (Create New Account)", () => {
     expect(c.notifications[0]!.status).toBe("SENT");
 
     await completeSetPassword(prisma, { token, password: "amina-pass-1", confirm: "amina-pass-1" });
-    expect((await verifyCustomerLogin(prisma, "OR-3000", "amina-pass-1"))?.id).toBe(c.user!.id);
+    expect((await verifyCustomerLogin(prisma, "OR-3000", "amina@shop.so", "amina-pass-1"))?.id).toBe(c.user!.id);
   });
 
   it("rejects missing fields and an email or phone that is already registered", async () => {

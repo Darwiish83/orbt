@@ -22,11 +22,4 @@ test.describe("visual regression", () => {
     await page.addStyleTag({ content: "nextjs-portal{display:none!important}" });
     await expect(page).toHaveScreenshot("login.png", { fullPage: true, maxDiffPixelRatio: 0.02 });
   });
-
-  test("admin login page", async ({ page }) => {
-    await page.goto("/admin/login");
-    await page.evaluate(() => document.fonts.ready);
-    await page.addStyleTag({ content: "nextjs-portal{display:none!important}" });
-    await expect(page).toHaveScreenshot("admin-login.png", { fullPage: true, maxDiffPixelRatio: 0.02 });
-  });
 });
