@@ -137,6 +137,12 @@ test.describe("authenticated session", () => {
     const dialog = page.getByRole("dialog", { name: /add customer/i });
     await dialog.getByLabel("Name").fill(name);
     await dialog.getByLabel("Company").fill("E2E Imports");
+    // Phone is mandatory: 9 digits after +252. A short number keeps the dialog open.
+    await dialog.getByLabel(/^Phone/).fill("61 555");
+    await dialog.getByRole("button", { name: /^save$/i }).click();
+    await expect(dialog.getByText(/9 digits after \+252 \(e\.g\./)).toBeVisible();
+    // Unique per run (last 7 digits from the clock).
+    await dialog.getByLabel(/^Phone/).fill(`62 ${String(Date.now()).slice(-7)}`);
     await dialog.getByRole("button", { name: /^save$/i }).click();
     await expect(page.getByRole("status").filter({ hasText: /customer saved/i }).first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText(name)).toBeVisible();

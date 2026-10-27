@@ -19,7 +19,7 @@ import {
 } from "@/modules/shipments/manage";
 import { addShipmentLine, changeShipmentStatus, createShipment } from "@/modules/shipments/service";
 import { createEmployee, setRoleModule, updateEmployee, type SaveEmployeeInput } from "@/modules/users/admin";
-import { assertTestDatabase, prisma, resetDb } from "./helpers";
+import { assertTestDatabase, prisma, resetDb, testPhone } from "./helpers";
 
 beforeAll(() => assertTestDatabase());
 beforeEach(() => resetDb());
@@ -129,8 +129,8 @@ describe("Users & Team: access control enforced on the server", () => {
 
 async function world() {
   const admin = await superAdmin();
-  const a = await createCustomer(prisma, admin, { name: "Alpha", company: "Alpha" });
-  const b = await createCustomer(prisma, admin, { name: "Beta", company: "Beta" });
+  const a = await createCustomer(prisma, admin, { name: "Alpha", company: "Alpha", phone: testPhone() });
+  const b = await createCustomer(prisma, admin, { name: "Beta", company: "Beta", phone: testPhone() });
   const w1 = await createShipment(prisma, admin, { mode: "AIR", originCountry: "Turkey", businessYear: 2026 });
   const la = await addShipmentLine(prisma, admin, w1.id, { customerId: a.id, packages: 4, chargeableWeightKg: "100", rate: "6" });
   await addShipmentLine(prisma, admin, w1.id, { customerId: b.id, packages: 2, chargeableWeightKg: "50", rate: "6" });
@@ -195,7 +195,7 @@ describe("Customers", () => {
     await expect(deleteCustomer(prisma, admin, a.id)).rejects.toThrow(/history/);
     await setCustomerStatus(prisma, admin, a.id, "INACTIVE");
     expect((await listAdminCustomers(prisma, admin, 2026, { status: "INACTIVE" })).rows.map((r) => r.id)).toEqual([a.id]);
-    const fresh = await createCustomer(prisma, admin, { name: "Gamma", company: "Gamma" });
+    const fresh = await createCustomer(prisma, admin, { name: "Gamma", company: "Gamma", phone: testPhone() });
     await deleteCustomer(prisma, admin, fresh.id);
     expect(await prisma.customer.findUnique({ where: { id: fresh.id } })).toBeNull();
   });
@@ -252,7 +252,7 @@ describe("Announcements, documents and reports", () => {
       image: { buffer: PNG, contentType: "image/png" },
     });
     expect(n.status).toBe("SCHEDULED");
-    const c = await createCustomer(prisma, admin, { name: "Cust", company: "Cust" });
+    const c = await createCustomer(prisma, admin, { name: "Cust", company: "Cust", phone: testPhone() });
     const cu = await prisma.user.create({ data: { email: `${uniq()}@c.so`, status: "ACTIVE", customerId: c.id } });
     const customer = (await loadAuthzUser(prisma, cu.id))!;
     await expect(getNotificationImage(prisma, customer, n.id)).rejects.toThrow();

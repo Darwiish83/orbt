@@ -9,7 +9,7 @@ import { recordPayment } from "@/modules/finance/payments";
 import { nextReceiptNumber } from "@/modules/finance/receipts";
 import { addShipmentLine, changeShipmentStatus, createShipment } from "@/modules/shipments/service";
 import { canTransition, statusSteps } from "@/modules/shipments/stateMachine";
-import { assertTestDatabase, prisma, resetDb } from "./helpers";
+import { assertTestDatabase, prisma, resetDb, testPhone } from "./helpers";
 
 beforeAll(() => assertTestDatabase());
 beforeEach(() => resetDb());
@@ -38,7 +38,7 @@ async function staff(perms: string[], country?: string): Promise<AuthzUser> {
 
 const D = (v: Prisma.Decimal.Value) => new Prisma.Decimal(v);
 const cust = (admin: AuthzUser, extra: Record<string, string> = {}) =>
-  createCustomer(prisma, admin, { name: `Cust ${uniq()}`, company: "Co", ...extra });
+  createCustomer(prisma, admin, { name: `Cust ${uniq()}`, company: "Co", phone: testPhone(), ...extra });
 
 // --------------------------------------------------------------- statuses
 
@@ -132,7 +132,7 @@ describe("customers (spec A1/B5)", () => {
     const admin = await superAdmin();
     await cust(admin, { email: "Amina@Shop.so", phone: "+252 61-555 0100" });
     await expect(cust(admin, { email: "amina@shop.so" })).rejects.toThrow(/email already exists/i);
-    await expect(cust(admin, { phone: "252615550100" })).rejects.toThrow(/phone number already exists/i);
+    await expect(cust(admin, { phone: "252615550100" })).rejects.toThrow(/phone number is already registered/i);
     const other = await cust(admin, { email: "other@shop.so" });
     await expect(updateCustomer(prisma, admin, other.id, { email: "AMINA@shop.so" })).rejects.toThrow(/email already exists/i);
     // Updating a customer to its own contact details is fine.

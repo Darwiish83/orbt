@@ -11,7 +11,8 @@ import { runAction } from "../runAction";
 const form = z.object({
   name: z.string().trim().min(1, "Full name is required").max(120),
   company: z.string().trim().min(1, "Company is required").max(120),
-  phone: z.string().trim().max(40).optional(),
+  // Mandatory, 9 digits after +252 — validated by the service (requireSomaliPhone).
+  phone: z.string().trim().max(40),
   email: z.string().trim().email().max(160).optional().or(z.literal("")),
   location: z.string().trim().max(160).optional(),
   cargoCategory: z.string().trim().max(160).optional(),

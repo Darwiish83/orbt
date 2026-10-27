@@ -6,7 +6,7 @@ import { recordPayment } from "@/modules/finance/payments";
 import { createShipment } from "@/modules/shipments/service";
 import { createEmployeeUser, listUsers, removeRole, setUserStatus } from "@/modules/users/service";
 import { getReport } from "@/modules/reporting/service";
-import { assertTestDatabase, prisma, resetDb } from "./helpers";
+import { assertTestDatabase, prisma, resetDb, testPhone } from "./helpers";
 
 beforeAll(() => assertTestDatabase());
 beforeEach(() => resetDb());
@@ -77,7 +77,7 @@ describe("user & team management", () => {
 describe("reporting read-model", () => {
   it("aggregates shipments, finance and customers", async () => {
     const admin = await superAdmin();
-    const c = await createCustomer(prisma, admin, { name: "Rep Co", company: "Test Co" });
+    const c = await createCustomer(prisma, admin, { name: "Rep Co", company: "Test Co", phone: testPhone() });
     await createShipment(prisma, admin, { mode: "AIR", originCountry: "Turkey", businessYear: 2026 });
     await createShipment(prisma, admin, { mode: "SEA", originCountry: "Turkey", businessYear: 2026 });
     const inv = await createInvoice(prisma, admin, {

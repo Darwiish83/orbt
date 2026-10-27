@@ -3,7 +3,8 @@ import { z } from "zod";
 import { ValidationError } from "@/lib/errors";
 import { logAudit } from "@/modules/audit/log";
 import { nextCustomerRef } from "@/modules/customers/ref";
-import { assertUniqueContact, somaliPhoneKey } from "@/modules/customers/service";
+import { PHONE_REQUIRED, PHONE_TAKEN } from "@/modules/customers/phone";
+import { assertUniqueContact, requireSomaliPhone, somaliPhoneKey } from "@/modules/customers/service";
 import { assertNotRateLimited, recordAttempt } from "./rateLimit";
 import { issueOtp, verifyOtp, type OtpSender } from "./otp";
 import { consumeResetToken, createSetPasswordToken } from "./reset";
@@ -37,8 +38,11 @@ export async function requestCustomerAccess(
 ): Promise<void> {
   const reference = norm(input.reference);
   const email = emailSchema.safeParse(input.email);
-  if (!reference || !email.success || !somaliPhoneKey(input.phone)) {
+  if (!reference || !email.success) {
     throw new ValidationError("Enter your customer reference, phone number and email");
+  }
+  if (!somaliPhoneKey(input.phone)) {
+    throw new ValidationError(PHONE_REQUIRED);
   }
   await assertNotRateLimited(db, reference, "otp");
 
@@ -86,20 +90,24 @@ const signupSchema = z.object({
 export type SignupInput = z.input<typeof signupSchema>;
 
 const ALREADY = "This email or phone is already registered. Log in with your Customer Reference.";
+const EMAIL_TAKEN = "This email is already registered. Log in with your Customer Reference.";
+
+/** Duplicate check with a message that says which field is taken (owner request). */
+async function assertSignupContactFree(db: Parameters<typeof assertUniqueContact>[0], email: string, phoneKey: string) {
+  try {
+    await assertUniqueContact(db, email, phoneKey);
+  } catch (e) {
+    throw new ValidationError(e instanceof ValidationError && e.message === PHONE_TAKEN ? PHONE_TAKEN : EMAIL_TAKEN);
+  }
+}
 
 export async function startCustomerSignup(db: PrismaClient, input: SignupInput, send: OtpSender): Promise<void> {
   const parsed = signupSchema.safeParse(input);
   if (!parsed.success) throw new ValidationError("Please fill in all required fields");
   const d = parsed.data;
-  const phoneKey = somaliPhoneKey(d.phone);
-  if (!phoneKey || phoneKey.length < 10) throw new ValidationError("Enter a valid phone number");
-
-  try {
-    await assertUniqueContact(db, d.email, phoneKey);
-  } catch {
-    throw new ValidationError(ALREADY);
-  }
-  if (await db.user.findUnique({ where: { email: d.email }, select: { id: true } })) throw new ValidationError(ALREADY);
+  const { key: phoneKey } = requireSomaliPhone(d.phone);
+  await assertSignupContactFree(db, d.email, phoneKey);
+  if (await db.user.findUnique({ where: { email: d.email }, select: { id: true } })) throw new ValidationError(EMAIL_TAKEN);
 
   const { code } = await issueOtp(db, { purpose: "CUSTOMER_SIGNUP", email: d.email, payload: { ...d, phoneKey } });
   await send(d.email, code, "CUSTOMER_SIGNUP");
@@ -120,18 +128,15 @@ export async function verifyCustomerSignup(
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const { userId, ref } = await db.$transaction(async (tx) => {
-        try {
-          await assertUniqueContact(tx, d.email, d.phoneKey); // re-check: someone may have registered meanwhile
-        } catch {
-          throw new ValidationError(ALREADY);
-        }
+        // Re-check: someone may have registered the same email/phone meanwhile.
+        await assertSignupContactFree(tx, d.email, d.phoneKey);
         const ref = await nextCustomerRef(tx);
         const customer = await tx.customer.create({
           data: {
             ref,
             name: d.name,
             company: d.company,
-            phone: `+252 ${d.phone.replace(/^\+?252\s*/, "")}`,
+            phone: requireSomaliPhone(d.phone).phone,
             phoneKey: d.phoneKey,
             email: d.email,
             location: d.location,

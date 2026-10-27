@@ -27,7 +27,7 @@ import {
   updateShipmentInvoice,
 } from "@/modules/finance/shipmentFinance";
 import { addShipmentLine, createShipment, listShipments } from "@/modules/shipments/service";
-import { assertTestDatabase, prisma, resetDb } from "./helpers";
+import { assertTestDatabase, prisma, resetDb, testPhone } from "./helpers";
 
 beforeAll(() => assertTestDatabase());
 beforeEach(() => resetDb());
@@ -60,8 +60,8 @@ const FIN = ["invoices:manage", "payments:manage"];
 /** Turkey W-1: customer A (120 kg + 8 kg MIX, rate 6, quality 0.5, fatura 20) and B (50 kg). */
 async function world() {
   const admin = await superAdmin();
-  const a = await createCustomer(prisma, admin, { name: "Alpha Co", company: "Alpha Co" });
-  const b = await createCustomer(prisma, admin, { name: "Beta Co", company: "Beta Co" });
+  const a = await createCustomer(prisma, admin, { name: "Alpha Co", company: "Alpha Co", phone: testPhone() });
+  const b = await createCustomer(prisma, admin, { name: "Beta Co", company: "Beta Co", phone: testPhone() });
   const w1 = await createShipment(prisma, admin, { mode: "AIR", originCountry: "Turkey", businessYear: 2026 });
   await addShipmentLine(prisma, admin, w1.id, { customerId: a.id, packages: 10, chargeableWeightKg: "120", rate: "6", qualityRate: "0.5", fatura: "20" });
   await addShipmentLine(prisma, admin, w1.id, { customerId: a.id, mixCount: 2, mixKg: "8" });
@@ -130,7 +130,7 @@ describe("shipment invoices (spec B9)", () => {
 
   it("allows one live invoice per customer per shipment and only for customers in it", async () => {
     const { admin, w1, a } = await world();
-    const stranger = await createCustomer(prisma, admin, { name: "Gamma", company: "Gamma" });
+    const stranger = await createCustomer(prisma, admin, { name: "Gamma", company: "Gamma", phone: testPhone() });
     await createShipmentInvoice(prisma, admin, { shipmentId: w1.id, customerId: a.id, ...inv("128") });
     await expect(createShipmentInvoice(prisma, admin, { shipmentId: w1.id, customerId: a.id, ...inv("128") })).rejects.toThrow(/already has an invoice/);
     await expect(createShipmentInvoice(prisma, admin, { shipmentId: w1.id, customerId: stranger.id, ...inv("10") })).rejects.toThrow(/not in the shipment/);

@@ -49,3 +49,10 @@ export function assertTestDatabase(): void {
     throw new Error(`Refusing to run integration tests: DATABASE_URL is not the test DB (${url})`);
   }
 }
+
+let phoneSeq = 0;
+/** A unique valid customer phone (9 digits after +252) for tests. */
+export function testPhone(): string {
+  phoneSeq++;
+  return `61 ${String(phoneSeq).padStart(7, "0").replace(/^(\d{3})(\d{4})$/, "$1 $2")}`;
+}

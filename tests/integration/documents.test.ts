@@ -10,7 +10,7 @@ import {
 import { generateStorageKey, localStorage } from "@/modules/documents/storage";
 import { createSignedToken, verifySignedToken } from "@/modules/documents/signing";
 import { sniffContentType, validateUpload } from "@/modules/documents/validation";
-import { assertTestDatabase, prisma, resetDb } from "./helpers";
+import { assertTestDatabase, prisma, resetDb, testPhone } from "./helpers";
 
 beforeAll(() => assertTestDatabase());
 beforeEach(() => resetDb());
@@ -82,7 +82,7 @@ describe("storage safety", () => {
 describe("document upload & download authorization", () => {
   it("lets staff with documents:write upload and documents:read download", async () => {
     const admin = await superAdmin();
-    const c = await createCustomer(prisma, admin, { name: "Acme", company: "Test Co" });
+    const c = await createCustomer(prisma, admin, { name: "Acme", company: "Test Co", phone: testPhone() });
     const uploader = await staff(["documents:write"]);
     const reader = await staff(["documents:read"]);
 
@@ -101,7 +101,7 @@ describe("document upload & download authorization", () => {
 
   it("denies staff without documents permission", async () => {
     const admin = await superAdmin();
-    const c = await createCustomer(prisma, admin, { name: "Acme", company: "Test Co" });
+    const c = await createCustomer(prisma, admin, { name: "Acme", company: "Test Co", phone: testPhone() });
     const doc = await uploadDocument(prisma, admin, {
       buffer: PNG,
       filename: "id.png",
@@ -115,8 +115,8 @@ describe("document upload & download authorization", () => {
 
   it("scopes customers to their own documents (IDOR)", async () => {
     const admin = await superAdmin();
-    const a = await createCustomer(prisma, admin, { name: "A", company: "Test Co" });
-    const b = await createCustomer(prisma, admin, { name: "B", company: "Test Co" });
+    const a = await createCustomer(prisma, admin, { name: "A", company: "Test Co", phone: testPhone() });
+    const b = await createCustomer(prisma, admin, { name: "B", company: "Test Co", phone: testPhone() });
     const docA = await uploadDocument(prisma, admin, {
       buffer: PDF,
       filename: "a.pdf",
@@ -147,7 +147,7 @@ describe("document upload & download authorization", () => {
 
   it("does not serve a soft-deleted document", async () => {
     const admin = await superAdmin();
-    const c = await createCustomer(prisma, admin, { name: "Acme", company: "Test Co" });
+    const c = await createCustomer(prisma, admin, { name: "Acme", company: "Test Co", phone: testPhone() });
     const doc = await uploadDocument(prisma, admin, {
       buffer: PDF,
       filename: "x.pdf",

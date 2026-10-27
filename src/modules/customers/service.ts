@@ -1,5 +1,6 @@
 import { Prisma, type Customer, type PrismaClient } from "@prisma/client";
 import { ValidationError } from "@/lib/errors";
+import { parseSomaliPhone, PHONE_REQUIRED, PHONE_TAKEN } from "./phone";
 import { buildPage, normalizePage, type Page, type PageParams } from "@/lib/pagination";
 import { logAudit } from "@/modules/audit/log";
 import {
@@ -24,30 +25,19 @@ export interface CreateCustomerInput {
   country?: string;
 }
 
-/** Fewer digits than this is only a prefix (e.g. the form's "+252 61"), not a phone number. */
-const MIN_PHONE_DIGITS = 7;
-
-/** The phone as entered, or null when it is empty or only a prefix. */
-export function cleanPhone(phone: string | null | undefined): string | null {
-  const trimmed = (phone ?? "").trim();
-  return trimmed.replace(/\D/g, "").length >= MIN_PHONE_DIGITS ? trimmed : null;
-}
-
-/** Digits-only phone key used to reject duplicates; null for an empty or prefix-only phone. */
-export function phoneKeyOf(phone: string | null | undefined): string | null {
-  const digits = (cleanPhone(phone) ?? "").replace(/\D/g, "");
-  return digits.length ? digits : null;
-}
-
 /**
- * Phone key for numbers entered after the app's fixed "+252" prefix: a local
- * number (61 555 0100 or 0615550100) gets the 252 country code.
+ * The customer's phone, validated (owner rule: mandatory, 9 digits after +252).
+ * Returns the canonical stored form and the duplicate-check key.
  */
+export function requireSomaliPhone(phone: string | null | undefined): { phone: string; key: string } {
+  const parsed = parseSomaliPhone(phone);
+  if (!parsed) throw new ValidationError(PHONE_REQUIRED);
+  return parsed;
+}
+
+/** Duplicate-check key for a valid phone, else null (used to match, never to store). */
 export function somaliPhoneKey(phone: string | null | undefined): string | null {
-  let digits = (phone ?? "").replace(/\D/g, "");
-  if (!digits) return null;
-  if (!digits.startsWith("252")) digits = "252" + digits.replace(/^0+/, "");
-  return digits;
+  return parseSomaliPhone(phone)?.key ?? null;
 }
 
 /** Throws a clear ValidationError if the email or phone already belongs to another customer. */
@@ -57,7 +47,7 @@ export async function assertUniqueContact(db: Prisma.TransactionClient | PrismaC
     throw new ValidationError("A customer with this email already exists");
   }
   if (phoneKey && (await db.customer.findFirst({ where: { phoneKey, ...not }, select: { id: true } }))) {
-    throw new ValidationError("A customer with this phone number already exists");
+    throw new ValidationError(PHONE_TAKEN);
   }
 }
 
@@ -80,7 +70,7 @@ export async function createCustomer(
   if (!name) throw new ValidationError("Full name is required");
   if (!company) throw new ValidationError("Company is required");
   const email = input.email?.trim().toLowerCase() || null;
-  const phoneKey = phoneKeyOf(input.phone);
+  const { phone, key: phoneKey } = requireSomaliPhone(input.phone);
   await assertUniqueContact(db, email, phoneKey);
 
   // Retry only on the rare concurrent ref collision; email/phone races surface as errors.
@@ -92,7 +82,7 @@ export async function createCustomer(
           ref,
           name,
           company,
-          phone: cleanPhone(input.phone),
+          phone,
           phoneKey,
           email,
           location: input.location?.trim() || null,
@@ -111,7 +101,7 @@ export async function createCustomer(
       return customer;
     } catch (e) {
       if (isUniqueViolation(e, "email")) throw new ValidationError("A customer with this email already exists");
-      if (isUniqueViolation(e, "phoneKey")) throw new ValidationError("A customer with this phone number already exists");
+      if (isUniqueViolation(e, "phoneKey")) throw new ValidationError(PHONE_TAKEN);
       if (attempt === 4 || !isUniqueViolation(e, "ref")) throw e;
     }
   }
@@ -185,14 +175,16 @@ export async function updateCustomer(
   assertCustomerAccess(actor, id, "customers:write");
   if (data.company !== undefined && !data.company.trim()) throw new ValidationError("Company is required");
   const email = data.email === undefined ? undefined : data.email.trim().toLowerCase() || null;
-  const phoneKey = data.phone === undefined ? undefined : phoneKeyOf(data.phone);
+  // A phone sent with an edit must be valid; it can't be cleared (mandatory).
+  const ph = data.phone === undefined ? undefined : requireSomaliPhone(data.phone);
+  const phoneKey = ph?.key;
   await assertUniqueContact(db, email ?? null, phoneKey ?? null, id);
   const customer = await db.customer.update({
     where: { id },
     data: {
       name: data.name?.trim(),
       company: data.company?.trim(),
-      phone: data.phone === undefined ? undefined : cleanPhone(data.phone),
+      phone: ph?.phone,
       phoneKey,
       email,
       location: data.location?.trim(),

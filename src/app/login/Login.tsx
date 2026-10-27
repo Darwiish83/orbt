@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element -- static brand logo */
 import { useActionState, useState, useTransition, type ReactNode } from "react";
 import { useT } from "@/i18n/I18nProvider";
+import { localPhoneDigits, PHONE_REQUIRED } from "@/modules/customers/phone";
 import { LangToggle } from "@/i18n/LangToggle";
 import { Overline, Seg } from "@/ui/kit";
 import { Button, Card, Icon, Input } from "@/ui/primitives";
@@ -20,6 +21,9 @@ type Mode = "existing" | "new";
 type Step = "form" | "otp" | "setpw";
 
 const blankSignup = { name: "", phone: "", email: "", company: "", location: "", cargoCategory: "" };
+
+/** Phone input keeps digits and spaces only. */
+const onlyPhoneChars = (v: string) => v.replace(/[^\d ]/g, "").slice(0, 13);
 
 /** Phone field with the design's fixed +252 prefix. */
 function phoneLead() {
@@ -127,13 +131,17 @@ export function Login() {
       else setErr(t(r.error));
     });
 
-  const sendAccess = () =>
+  // Customers must give a 9-digit number before moving on (the server re-checks).
+  const sendAccess = () => {
+    if (!staff && !localPhoneDigits(phone)) return setErr(t(PHONE_REQUIRED));
     run(() => requestAccessAction({ id: ref, phone, email }), () => {
       setOtp("");
       setStep("otp");
     });
+  };
   const sendSignup = () => {
     if (Object.values(nc).some((v) => !v.trim())) return setErr(t("Please fill in all required fields"));
+    if (!localPhoneDigits(nc.phone)) return setErr(t(PHONE_REQUIRED));
     run(() => startSignupAction(nc), () => {
       setEmail(nc.email);
       setOtp("");
@@ -339,7 +347,17 @@ export function Login() {
                       leadingIcon={<Icon name="Mail" size={16} />}
                       hint={t("Your OTP code will be sent to this email")}
                     />
-                    {!staff && <Input label={t("Phone Number")} value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" leadingIcon={phoneLead()} />}
+                    {!staff && (
+                      <Input
+                        label={t("Phone Number")}
+                        value={phone}
+                        onChange={(e) => setPhone(onlyPhoneChars(e.target.value))}
+                        inputMode="tel"
+                        leadingIcon={phoneLead()}
+                        placeholder="61 555 0100"
+                        hint={t("9 digits after +252")}
+                      />
+                    )}
                     {err && <ErrorBox>{err}</ErrorBox>}
                     <Button fullWidth size="l" onClick={sendAccess} disabled={busy} trailingIcon={<Icon name="ArrowRight" size={16} />}>
                       {t("Send OTP")}
@@ -359,7 +377,15 @@ export function Login() {
                 {mode === "new" && (
                   <>
                     <Input label={`${t("Full Name")} *`} value={nc.name} onChange={(e) => setNc("name", e.target.value)} placeholder="Abdirahman Hassan" />
-                    <Input label={`${t("Phone Number")} *`} value={nc.phone} onChange={(e) => setNc("phone", e.target.value)} inputMode="tel" leadingIcon={phoneLead()} placeholder="61 000 0000" />
+                    <Input
+                      label={`${t("Phone Number")} *`}
+                      value={nc.phone}
+                      onChange={(e) => setNc("phone", onlyPhoneChars(e.target.value))}
+                      inputMode="tel"
+                      leadingIcon={phoneLead()}
+                      placeholder="61 555 0100"
+                      hint={t("9 digits after +252")}
+                    />
                     <Input
                       label={`${t("Email")} *`}
                       type="email"

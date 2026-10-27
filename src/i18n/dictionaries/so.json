@@ -1644,5 +1644,9 @@
   "By country": "Dal kasta",
   "Month by month": "Bil kasta",
   "Month": "Bisha",
-  "Generated from OrbitCargo on": "Waxaa laga soo saaray OrbitCargo"
+  "Generated from OrbitCargo on": "Waxaa laga soo saaray OrbitCargo",
+  "Enter the phone number: 9 digits after +252 (e.g. 61 555 0100)": "Geli lambarka taleefanka: 9 god kadib +252 (tusaale 61 555 0100)",
+  "This phone number is already registered": "Lambarkan taleefanka horay ayaa loo diiwaangeliyay",
+  "This email is already registered. Log in with your Customer Reference.": "Iimaylkan horay ayaa loo diiwaangeliyay. Ku gal Tixraaca Macmiilkaaga.",
+  "9 digits after +252": "9 god kadib +252"
 }

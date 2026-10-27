@@ -7,6 +7,7 @@ import { useT } from "@/i18n/I18nProvider";
 import { DataTable, INVOICE_STATUS_LABEL, KV, SearchBox, Stat, StatusBadge, SHIPMENT_STATUS_LABEL, type DataColumn } from "@/ui/kit";
 import { Badge, Button, Dialog, Icon, Input, Tabs } from "@/ui/primitives";
 import { fdate, money, num } from "@/ui/format";
+import { localPhoneDigits, PHONE_REQUIRED } from "@/modules/customers/phone";
 import type { AdminCustomerRow, listAdminCustomers, getCustomerDetails } from "@/modules/customers/admin";
 import { Drawer, FinBox, RowMenu, ToastHost, useToast } from "@/components/admin/ui";
 import { createCustomerAction, customerDetailsAction, deleteCustomerAction, setCustomerStatusAction, updateCustomerAction, type CustomerFormValues } from "./actions";
@@ -289,7 +290,8 @@ function CustomerForm({ c, onClose, onSaved }: { c: AdminCustomerRow | null; onC
   const [v, setV] = useState<Required<CustomerFormValues>>({
     name: c?.name ?? "",
     company: c?.company ?? "",
-    phone: c?.phone ?? "+252 61 ",
+    // Local part only; "+252" is shown as the field's fixed prefix.
+    phone: c?.phone ? c.phone.replace(/^\+?252\s*/, "") : "",
     email: c?.email ?? "",
     location: c?.location ?? "Mogadishu",
     cargoCategory: c?.cargoCategory ?? "",
@@ -297,13 +299,18 @@ function CustomerForm({ c, onClose, onSaved }: { c: AdminCustomerRow | null; onC
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const set = (k: keyof CustomerFormValues) => (e: React.ChangeEvent<HTMLInputElement>) => setV((o) => ({ ...o, [k]: e.target.value }));
-  const save = () =>
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+  const save = () => {
+    // Mandatory 9-digit number: stop here and say so (the server re-checks).
+    if (!localPhoneDigits(v.phone)) return setPhoneError(t(PHONE_REQUIRED));
+    setPhoneError(null);
     start(async () => {
       setError(null);
       const r = c ? await updateCustomerAction(c.id, v) : await createCustomerAction(v);
       if (!r.ok) return setError(r.error);
       onSaved(c?.ref ?? (r.data as { ref: string }).ref);
     });
+  };
   return (
     <Dialog
       open
@@ -324,7 +331,20 @@ function CustomerForm({ c, onClose, onSaved }: { c: AdminCustomerRow | null; onC
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 14 }}>
         <Input label={t("Customer Reference")} value={c?.ref ?? t("Automatic (OR-…)")} readOnly inputStyle={{ fontFamily: "var(--font-mono)", background: "var(--surface-sunken)" }} />
         <Input label={t("Name")} value={v.name} onChange={set("name")} required />
-        <Input label={t("Phone")} value={v.phone} onChange={set("phone")} />
+        <Input
+          label={`${t("Phone")} *`}
+          value={v.phone}
+          onChange={(e) => {
+            setPhoneError(null);
+            setV((o) => ({ ...o, phone: ((v: string) => v.replace(/[^\d ]/g, "").slice(0, 13))(e.target.value) }));
+          }}
+          inputMode="tel"
+          placeholder="61 555 0100"
+          leadingIcon={<span style={{ font: "600 14px var(--font-body)", color: "var(--text-strong)" }}>+252</span>}
+          hint={t("9 digits after +252")}
+          error={phoneError ?? undefined}
+          required
+        />
         <Input label={t("Company")} value={v.company} onChange={set("company")} required />
         <Input label={t("Email")} type="email" value={v.email} onChange={set("email")} />
         <Input label={t("Location")} value={v.location} onChange={set("location")} />

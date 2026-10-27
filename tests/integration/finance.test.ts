@@ -4,7 +4,7 @@ import { createCustomer } from "@/modules/customers/service";
 import { createInvoice, getInvoice, voidInvoice } from "@/modules/finance/invoices";
 import { recordPayment, reversePayment } from "@/modules/finance/payments";
 import { convertQuoteToInvoice, createQuote, setQuoteStatus } from "@/modules/finance/quotes";
-import { assertTestDatabase, prisma, resetDb } from "./helpers";
+import { assertTestDatabase, prisma, resetDb, testPhone } from "./helpers";
 
 beforeAll(() => assertTestDatabase());
 beforeEach(() => resetDb());
@@ -32,7 +32,7 @@ async function staff(perms: string[]): Promise<AuthzUser> {
 }
 
 async function customerId(admin: AuthzUser): Promise<string> {
-  return (await createCustomer(prisma, admin, { name: `C-${uniq()}`, company: "Test Co" })).id;
+  return (await createCustomer(prisma, admin, { name: `C-${uniq()}`, company: "Test Co", phone: testPhone() })).id;
 }
 
 describe("charge lines & invoice totals (server-computed)", () => {

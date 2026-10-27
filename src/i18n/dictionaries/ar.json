@@ -1644,5 +1644,9 @@
   "By country": "حسب الدولة",
   "Month by month": "شهراً بشهر",
   "Month": "الشهر",
-  "Generated from OrbitCargo on": "أُنشئ من OrbitCargo في"
+  "Generated from OrbitCargo on": "أُنشئ من OrbitCargo في",
+  "Enter the phone number: 9 digits after +252 (e.g. 61 555 0100)": "أدخل رقم الهاتف: 9 أرقام بعد ‎+252 (مثال 61 555 0100)",
+  "This phone number is already registered": "رقم الهاتف هذا مسجّل مسبقًا",
+  "This email is already registered. Log in with your Customer Reference.": "هذا البريد الإلكتروني مسجّل مسبقًا. سجّل الدخول بمرجع العميل.",
+  "9 digits after +252": "9 أرقام بعد ‎+252"
 }

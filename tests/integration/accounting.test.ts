@@ -29,7 +29,7 @@ import { addShipmentPayment, createShipmentInvoice } from "@/modules/finance/shi
 import { dec } from "@/modules/finance/money";
 import { addShipmentLine, createShipment } from "@/modules/shipments/service";
 import { createEmployee } from "@/modules/users/admin";
-import { assertTestDatabase, prisma, resetDb } from "./helpers";
+import { assertTestDatabase, prisma, resetDb, testPhone } from "./helpers";
 
 beforeAll(() => assertTestDatabase());
 beforeEach(() => resetDb());
@@ -50,8 +50,8 @@ async function superAdmin(): Promise<AuthzUser> {
 /** Turkey air W-1: 100 kg at $8 (+$1 agent) for Alpha, 50 kg at $8 for Beta. */
 async function world() {
   const admin = await superAdmin();
-  const a = await createCustomer(prisma, admin, { name: "Alpha", company: "Alpha" });
-  const b = await createCustomer(prisma, admin, { name: "Beta", company: "Beta" });
+  const a = await createCustomer(prisma, admin, { name: "Alpha", company: "Alpha", phone: testPhone() });
+  const b = await createCustomer(prisma, admin, { name: "Beta", company: "Beta", phone: testPhone() });
   const w1 = await createShipment(prisma, admin, { mode: "AIR", originCountry: "Turkey", businessYear: 2026, shipDate: D("2026-10-01") });
   await addShipmentLine(prisma, admin, w1.id, { customerId: a.id, packages: 4, chargeableWeightKg: "100", rate: "8", delivery: "10", fatura: "20" });
   await addShipmentLine(prisma, admin, w1.id, { customerId: b.id, packages: 2, chargeableWeightKg: "50", rate: "8" });

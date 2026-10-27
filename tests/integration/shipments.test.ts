@@ -14,7 +14,7 @@ import {
   listShipments,
 } from "@/modules/shipments/service";
 import { trackByNumber } from "@/modules/shipments/publicTracking";
-import { assertTestDatabase, prisma, resetDb } from "./helpers";
+import { assertTestDatabase, prisma, resetDb, testPhone } from "./helpers";
 
 beforeAll(() => assertTestDatabase());
 beforeEach(() => resetDb());
@@ -66,8 +66,8 @@ describe("identifier generation", () => {
     expect(air2.code).toBe("W-2");
     expect(sea1.code).toBe("C-1");
 
-    const c1 = await createCustomer(prisma, admin, { name: "A", company: "Test Co" });
-    const c2 = await createCustomer(prisma, admin, { name: "B", company: "Test Co" });
+    const c1 = await createCustomer(prisma, admin, { name: "A", company: "Test Co", phone: testPhone() });
+    const c2 = await createCustomer(prisma, admin, { name: "B", company: "Test Co", phone: testPhone() });
     expect(c1.ref).toBe("OR-3000");
     expect(c2.ref).toBe("OR-3001");
   });
@@ -172,8 +172,8 @@ describe("public tracking (approved subset only)", () => {
 describe("customer-scoped shipment access (IDOR)", () => {
   it("lets a customer read only shipments carrying their own line", async () => {
     const admin = await superAdmin();
-    const a = await createCustomer(prisma, admin, { name: "Cust A", company: "Test Co" });
-    const b = await createCustomer(prisma, admin, { name: "Cust B", company: "Test Co" });
+    const a = await createCustomer(prisma, admin, { name: "Cust A", company: "Test Co", phone: testPhone() });
+    const b = await createCustomer(prisma, admin, { name: "Cust B", company: "Test Co", phone: testPhone() });
     const shipment = await createShipment(prisma, admin, { mode: "AIR", originCountry: "Turkey", businessYear: 2026 });
     await addShipmentLine(prisma, admin, shipment.id, { customerId: a.id });
 
@@ -208,8 +208,8 @@ describe("pagination & filtering", () => {
 describe("customer access", () => {
   it("enforces ownership on getCustomer and scopes listCustomers", async () => {
     const admin = await superAdmin();
-    const a = await createCustomer(prisma, admin, { name: "A", company: "Test Co" });
-    const b = await createCustomer(prisma, admin, { name: "B", company: "Test Co" });
+    const a = await createCustomer(prisma, admin, { name: "A", company: "Test Co", phone: testPhone() });
+    const b = await createCustomer(prisma, admin, { name: "B", company: "Test Co", phone: testPhone() });
     const custA = await customerPrincipal(a.id);
 
     await expect(getCustomer(prisma, custA, a.id)).resolves.toBeTruthy();
