@@ -76,6 +76,19 @@ jobs:
           printf 'DOCUMENTS_DIR="%s"\n' "$DOCUMENTS_DIR" >> .env
       - run: npx prisma migrate deploy
       - run: npx prisma db seed
+      # E2E secrets are random for every run and never stored: the CI database
+      # is thrown away afterwards, so nothing needs to live in GitHub Secrets.
+      - name: Per-run random E2E secrets
+        run: |
+          P1=$(openssl rand -base64 24); P2=$(openssl rand -base64 24)
+          MFA=$(node -e 'console.log(require("otplib").authenticator.generateSecret())')
+          echo "::add-mask::$P1"; echo "::add-mask::$P2"; echo "::add-mask::$MFA"
+          {
+            echo "E2E_DATABASE_URL=$DATABASE_URL"
+            echo "E2E_PASSWORD=$P1"
+            echo "E2E_CUSTOMER_PASSWORD=$P2"
+            echo "E2E_MFA_SECRET=$MFA"
+          } >> "$GITHUB_ENV"
       - run: npx playwright install --with-deps chromium
       # Smoke suite only; visual-regression baselines are platform-specific and
       # are run locally (see tests/e2e/visual.spec.ts).

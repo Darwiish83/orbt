@@ -25,7 +25,8 @@ Next.js 15 App Router + React 19 + TypeScript strict, Prisma 6 / PostgreSQL 16, 
 
 ## Commands
 - `npm run typecheck`, `npm run lint`, `npm test` (unit), `npm run test:integration` (uses `.env.test` DB)
-- E2E: `E2E_PORT=3400 npx playwright test` (another session may hold :3100)
+- E2E: `E2E_PORT=3400 npx playwright test` (another session may hold :3100). Needs `E2E_*` in `.env.test` (template `.env.test.example`); runs against its own DB `orbitcargo_e2e`
+- Accounts: `scripts/make-super-admin.ts` (never takes a password), `scripts/suspend-test-accounts.ts`. Never write passwords or secrets in code, docs or chat replies — see `docs/security/SECRETS_AND_ACCOUNTS.md`
 - Design parity: `npm run test:design`
 - Migrations: write SQL with `prisma migrate diff --from-schema-datasource … --to-schema-datamodel … --script`, test on a restored copy, then `prisma migrate deploy` (dev and test). Back up first with `docker exec orbitcargo-postgres pg_dump …` into `backups/` (git-ignored).
 - `prisma generate` can't replace the engine DLL while other dev servers run (Windows file lock); the types still regenerate.

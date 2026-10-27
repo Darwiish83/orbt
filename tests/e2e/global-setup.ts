@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { hash } from "@node-rs/argon2";
@@ -11,6 +12,7 @@ import {
   E2E_MFA_SECRET,
   E2E_PASSWORD,
 } from "./constants";
+import { e2eEnv } from "./env";
 
 function envValue(name: string): string {
   if (process.env[name]) return process.env[name]!;
@@ -31,7 +33,14 @@ function encryptSecret(plain: string, authSecret: string): string {
 }
 
 export default async function globalSetup() {
-  const prisma = new PrismaClient({ datasources: { db: { url: envValue("DATABASE_URL") } } });
+  // The E2E database is separate from the development one; bring it up to the
+  // current schema and reference data before seeding the test accounts.
+  const url = e2eEnv("E2E_DATABASE_URL");
+  const env = { ...process.env, DATABASE_URL: url };
+  execSync("npx prisma migrate deploy", { env, stdio: "ignore" });
+  execSync("npx tsx prisma/seed.ts", { env, stdio: "ignore" });
+
+  const prisma = new PrismaClient({ datasources: { db: { url } } });
   try {
     const authSecret = envValue("AUTH_SECRET");
     // Negative login tests record failures; clear them for the E2E accounts only
