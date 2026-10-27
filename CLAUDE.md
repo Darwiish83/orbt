@@ -21,6 +21,7 @@ Next.js 15 App Router + React 19 + TypeScript strict, Prisma 6 / PostgreSQL 16, 
 - Money: `Prisma.Decimal` via `src/modules/finance/money.ts`; totals recomputed server-side.
 - Errors: `ValidationError` messages are fixed, translatable strings; never leak whether an account exists.
 - New UI strings get EN keys plus SO/AR entries in `src/i18n/dictionaries/`.
+- MFA (ADR-027): TOTP window ±1 step + `mfaLastStep` replay guard; second-factor failures count towards the login rate limit. Locked by `tests/integration/mfa.test.ts` — never narrow it back to window 0.
 - Tailwind preflight is OFF (the design system is content-box); app layout wrappers set `boxSizing: "border-box"` explicitly.
 
 ## Commands

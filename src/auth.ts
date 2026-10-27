@@ -47,14 +47,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           c.kind === "customer"
             ? await verifyCustomerLogin(prisma, c.reference, c.email, c.password)
             : await verifyStaffLogin(prisma, c.employeeId, c.email, c.password);
-        await recordAttempt(prisma, { identifier, kind: "login", success: !!user });
-        if (!user) return null;
-
         // Second factor: when MFA is enabled, a valid TOTP or recovery code is required.
-        if (user.mfaEnabled) {
-          const code = c.kind === "staff" ? c.code : undefined;
-          if (!code || !(await verifyMfa(prisma, user.id, code))) return null;
-        }
+        const code = c.kind === "staff" ? c.code : undefined;
+        const mfaOk = !!user && (!user.mfaEnabled || (!!code && (await verifyMfa(prisma, user.id, code))));
+        // Recorded only after BOTH factors, so wrong authenticator codes count
+        // towards the rate limit too (no unlimited guessing of the 6 digits).
+        await recordAttempt(prisma, { identifier, kind: "login", success: mfaOk });
+        if (!user || !mfaOk) return null;
 
         // Users & Team → "Last Login".
         await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });

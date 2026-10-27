@@ -60,7 +60,7 @@ export default async function globalSetup() {
     const mfaSecret = encryptSecret(E2E_MFA_SECRET, authSecret);
     const user = await prisma.user.upsert({
       where: { email: E2E_EMAIL },
-      update: { passwordHash, status: "ACTIVE", mfaEnabled: true, mfaSecret },
+      update: { passwordHash, status: "ACTIVE", mfaEnabled: true, mfaSecret, mfaLastStep: null },
       create: { email: E2E_EMAIL, passwordHash, status: "ACTIVE", mfaEnabled: true, mfaSecret },
     });
     // Grant super_admin so the write-path E2E (create customer) is authorized.

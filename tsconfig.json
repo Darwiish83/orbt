@@ -45,6 +45,10 @@
   ],
   "exclude": [
     "node_modules",
-    "design-reference"
+    "design-reference",
+    ".next-design",
+    ".next-e2e",
+    ".next-preview",
+    ".next-build"
   ]
 }

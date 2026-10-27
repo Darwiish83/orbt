@@ -182,6 +182,8 @@ model User {
   status            UserStatus @default(INVITED)
   mfaEnabled        Boolean    @default(false)
   mfaSecret         String? // TOTP secret, AES-256-GCM encrypted at rest
+  // Last 30-second TOTP step accepted: a code (and anything older) can never be reused.
+  mfaLastStep       Int?
   // Bumped to invalidate all existing JWT sessions (password reset / forced
   // logout). The authorization layer compares this on every protected access.
   sessionEpoch      Int        @default(0)

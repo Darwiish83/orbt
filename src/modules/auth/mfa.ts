@@ -28,12 +28,28 @@ function generateRecoveryCode(): string {
   return `${s.slice(0, 5)}-${s.slice(5)}`;
 }
 
-export function verifyTotpCode(secret: string, code: string): boolean {
+const STEP_SECONDS = 30;
+/**
+ * Accept the current 30-second code and one step either side: a code that
+ * rotated while it was being typed, or a phone clock a little off, still
+ * works (RFC 6238 §5.2). Replays are blocked separately (mfaLastStep).
+ */
+const TOTP = authenticator.clone({ window: 1 });
+
+/** The 30-second step a valid code belongs to, or null if the code is wrong. */
+export function totpStep(secret: string, code: string): number | null {
+  const c = code.replace(/\s/g, "");
+  if (!/^\d{6}$/.test(c)) return null;
   try {
-    return authenticator.check(code.trim(), secret);
+    const delta = TOTP.checkDelta(c, secret);
+    return delta === null ? null : Math.floor(Date.now() / 1000 / STEP_SECONDS) + delta;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export function verifyTotpCode(secret: string, code: string): boolean {
+  return totpStep(secret, code) !== null;
 }
 
 /** Begin enrollment: store an (encrypted) secret, mfaEnabled stays false until
@@ -68,11 +84,13 @@ export async function enableMfa(db: PrismaClient, userId: string, code: string):
   const user = await db.user.findUniqueOrThrow({ where: { id: userId } });
   if (!user.mfaSecret) throw new Error("No MFA setup in progress");
   const secret = decryptSecret(user.mfaSecret);
-  if (!verifyTotpCode(secret, code)) throw new Error("Invalid authenticator code");
+  const step = totpStep(secret, code);
+  if (step === null) throw new Error("Invalid authenticator code");
 
   const codes = Array.from({ length: RECOVERY_CODE_COUNT }, generateRecoveryCode);
   await db.$transaction(async (tx) => {
-    await tx.user.update({ where: { id: userId }, data: { mfaEnabled: true } });
+    // The code used to enable MFA can't be replayed at login.
+    await tx.user.update({ where: { id: userId }, data: { mfaEnabled: true, mfaLastStep: step } });
     await tx.mfaRecoveryCode.deleteMany({ where: { userId } });
     await tx.mfaRecoveryCode.createMany({ data: codes.map((c) => ({ userId, codeHash: hashCode(c) })) });
   });
@@ -85,7 +103,16 @@ export async function enableMfa(db: PrismaClient, userId: string, code: string):
 export async function verifyMfa(db: PrismaClient, userId: string, code: string): Promise<boolean> {
   const user = await db.user.findUnique({ where: { id: userId } });
   if (!user?.mfaEnabled || !user.mfaSecret) return false;
-  if (verifyTotpCode(decryptSecret(user.mfaSecret), code)) return true;
+  const step = totpStep(decryptSecret(user.mfaSecret), code);
+  if (step !== null) {
+    // Each code works once: accept only a step newer than the last one used
+    // (atomic, so two simultaneous logins with the same code can't both pass).
+    const { count } = await db.user.updateMany({
+      where: { id: userId, OR: [{ mfaLastStep: null }, { mfaLastStep: { lt: step } }] },
+      data: { mfaLastStep: step },
+    });
+    return count === 1;
+  }
   return consumeRecoveryCode(db, userId, code);
 }
 

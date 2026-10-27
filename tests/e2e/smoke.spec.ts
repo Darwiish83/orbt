@@ -10,12 +10,25 @@ import {
   E2E_PASSWORD,
 } from "./constants";
 
+// Each authenticator code works once (replay protection), so a second staff
+// login inside the same 30-second window waits for the next code.
+let lastTotpStep = -1;
+async function freshTotp(): Promise<string> {
+  let step = Math.floor(Date.now() / 30_000);
+  if (step === lastTotpStep) {
+    await new Promise((r) => setTimeout(r, (step + 1) * 30_000 - Date.now() + 500));
+    step = Math.floor(Date.now() / 30_000);
+  }
+  lastTotpStep = step;
+  return authenticator.generate(E2E_MFA_SECRET);
+}
+
 async function staffLogin(page: Page) {
   await page.goto("/login");
   await page.getByLabel("Employee ID or Customer Reference").fill(E2E_EMPLOYEE_ID);
   await page.getByLabel("Gmail").fill(E2E_EMAIL);
   await page.getByLabel("Password").fill(E2E_PASSWORD);
-  await page.getByLabel("Authenticator code").fill(authenticator.generate(E2E_MFA_SECRET));
+  await page.getByLabel("Authenticator code").fill(await freshTotp());
   await page.getByRole("button", { name: /log in/i }).click();
   // Generous timeout: a dev server compiles /dashboard on first hit.
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });

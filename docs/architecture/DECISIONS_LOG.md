@@ -40,6 +40,8 @@ Authoritative record of resolved decisions. Supersedes the "open decision" notes
 
 | ADR-026 | 2026-10-27 | **Secrets & test accounts** (owner request) | People's passwords exist only as hashes and in each person's password manager; app secrets only in `.env` / the host's secret store; E2E secrets in `.env.test` (random per machine) or random per CI run; E2E uses its own database. Test/demo accounts suspended (not deleted); the scripts that created them with in-code passwords removed; EMP-003 (owner) granted Super Admin without anyone handling a password. | Details, risks and the production checklist: `docs/security/SECRETS_AND_ACCOUNTS.md`. |
 
+| ADR-027 | 2026-10-27 | **Authenticator (TOTP) acceptance** — fixes owner's rejected admin login | A code is accepted for its 30-second step **±1 step** (code that rotated while typing, phone clock slightly off); **each step is accepted once** (`User.mfaLastStep`, atomic) so codes can't be replayed, including the enrolment code; **wrong second-factor codes count as failed logins** (rate limit). | Before: window 0 rejected valid codes near a rotation, and MFA failures were recorded as successful logins (unlimited guessing). Guarded by `tests/integration/mfa.test.ts` ("TOTP timing and replay") — **do not narrow the window or drop the replay guard without owner approval.** |
+
 ## Still open (to resolve by the phase noted)
 - ~~Specific charge-component model~~ — **decided (ADR-013).**
 - **Customs / tax / FX rules** — intentionally not invented; charge categories are configurable, rates/policies to be provided by the business owner. *(owner input)*

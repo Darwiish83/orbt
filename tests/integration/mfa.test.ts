@@ -19,6 +19,11 @@ afterAll(() => prisma.$disconnect());
 let seq = 0;
 const uniq = () => `${Date.now()}-${seq++}`;
 
+/** The TOTP code `offsetSeconds` from now (negative = an earlier code). */
+function codeAt(secret: string, offsetSeconds: number): string {
+  return authenticator.clone({ epoch: Date.now() + offsetSeconds * 1000 }).generate(secret);
+}
+
 async function makeUser(): Promise<{ id: string }> {
   return prisma.user.create({ data: { email: `${uniq()}@orbit.so`, status: "ACTIVE" } });
 }
@@ -78,7 +83,9 @@ describe("TOTP enrollment & verification", () => {
     const { secret } = await beginMfaSetup(prisma, user.id, "u@orbit.so");
     const codes = await enableMfa(prisma, user.id, authenticator.generate(secret));
 
-    expect(await verifyMfa(prisma, user.id, authenticator.generate(secret))).toBe(true);
+    // The enrolment code is spent; the next 30-second code signs in.
+    expect(await verifyMfa(prisma, user.id, authenticator.generate(secret))).toBe(false);
+    expect(await verifyMfa(prisma, user.id, codeAt(secret, 30))).toBe(true);
     expect(await verifyMfa(prisma, user.id, "000000")).toBe(false);
 
     // Recovery code works once.
@@ -96,5 +103,43 @@ describe("TOTP enrollment & verification", () => {
     expect(after.mfaEnabled).toBe(false);
     expect(after.mfaSecret).toBeNull();
     expect(await prisma.mfaRecoveryCode.count({ where: { userId: admin.id } })).toBe(0);
+  });
+});
+
+describe("TOTP timing and replay", () => {
+  async function enrolled() {
+    const user = await makeUser();
+    const { secret } = await beginMfaSetup(prisma, user.id, "t@orbit.so");
+    // Enrol with the code from two steps ago so the current window is still unused.
+    await prisma.user.update({ where: { id: user.id }, data: { mfaSecret: encryptSecret(secret), mfaEnabled: true, mfaLastStep: 0 } });
+    return { user, secret };
+  }
+
+  it("accepts a code that rotated a moment ago (previous 30 s) and one from a clock slightly ahead", async () => {
+    const a = await enrolled();
+    expect(await verifyMfa(prisma, a.user.id, codeAt(a.secret, -30))).toBe(true);
+    const b = await enrolled();
+    expect(await verifyMfa(prisma, b.user.id, codeAt(b.secret, 30))).toBe(true);
+  });
+
+  it("rejects codes more than one step away", async () => {
+    const { user, secret } = await enrolled();
+    expect(await verifyMfa(prisma, user.id, codeAt(secret, -90))).toBe(false);
+    expect(await verifyMfa(prisma, user.id, codeAt(secret, 90))).toBe(false);
+  });
+
+  it("never accepts the same code twice, nor an older one after a newer was used", async () => {
+    const { user, secret } = await enrolled();
+    const now = codeAt(secret, 0);
+    expect(await verifyMfa(prisma, user.id, now)).toBe(true);
+    expect(await verifyMfa(prisma, user.id, now)).toBe(false);
+    expect(await verifyMfa(prisma, user.id, codeAt(secret, -30))).toBe(false);
+  });
+
+  it("two simultaneous logins with one code: only one passes", async () => {
+    const { user, secret } = await enrolled();
+    const code = codeAt(secret, 0);
+    const results = await Promise.all([verifyMfa(prisma, user.id, code), verifyMfa(prisma, user.id, code)]);
+    expect(results.filter(Boolean)).toHaveLength(1);
   });
 });
