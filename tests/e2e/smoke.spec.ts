@@ -132,10 +132,13 @@ test.describe("authenticated session", () => {
     await staffLogin(page);
     await page.goto("/customers");
     const name = `E2E Customer ${Date.now()}`;
-    await page.getByLabel("New customer").fill(name);
-    await page.getByLabel("Company").fill("E2E Imports");
+    // Phase 14 Customers screen: "Add Customer" opens the CustomerForm dialog.
     await page.getByRole("button", { name: /add customer/i }).click();
-    await expect(page.getByRole("status")).toContainText(/customer added/i, { timeout: 15_000 });
+    const dialog = page.getByRole("dialog", { name: /add customer/i });
+    await dialog.getByLabel("Name").fill(name);
+    await dialog.getByLabel("Company").fill("E2E Imports");
+    await dialog.getByRole("button", { name: /^save$/i }).click();
+    await expect(page.getByRole("status").filter({ hasText: /customer saved/i }).first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText(name)).toBeVisible();
   });
 });

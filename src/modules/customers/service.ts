@@ -24,9 +24,18 @@ export interface CreateCustomerInput {
   country?: string;
 }
 
-/** Digits-only phone key used to reject duplicates. */
+/** Fewer digits than this is only a prefix (e.g. the form's "+252 61"), not a phone number. */
+const MIN_PHONE_DIGITS = 7;
+
+/** The phone as entered, or null when it is empty or only a prefix. */
+export function cleanPhone(phone: string | null | undefined): string | null {
+  const trimmed = (phone ?? "").trim();
+  return trimmed.replace(/\D/g, "").length >= MIN_PHONE_DIGITS ? trimmed : null;
+}
+
+/** Digits-only phone key used to reject duplicates; null for an empty or prefix-only phone. */
 export function phoneKeyOf(phone: string | null | undefined): string | null {
-  const digits = (phone ?? "").replace(/\D/g, "");
+  const digits = (cleanPhone(phone) ?? "").replace(/\D/g, "");
   return digits.length ? digits : null;
 }
 
@@ -83,7 +92,7 @@ export async function createCustomer(
           ref,
           name,
           company,
-          phone: input.phone?.trim() || null,
+          phone: cleanPhone(input.phone),
           phoneKey,
           email,
           location: input.location?.trim() || null,
@@ -183,7 +192,7 @@ export async function updateCustomer(
     data: {
       name: data.name?.trim(),
       company: data.company?.trim(),
-      phone: data.phone === undefined ? undefined : data.phone.trim() || null,
+      phone: data.phone === undefined ? undefined : cleanPhone(data.phone),
       phoneKey,
       email,
       location: data.location?.trim(),
