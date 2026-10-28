@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { Icon } from "@/ui/primitives";
 import { useT } from "@/i18n/I18nProvider";
 import { LangToggle } from "@/i18n/LangToggle";
+import { DeveloperCredit } from "@/components/DeveloperCredit";
 
 const NAV = [
   { href: "/account", label: "Shipments", exact: true },
@@ -28,7 +29,7 @@ export function PortalShell({
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <header className="portal-header">
+      <header className="portal-header no-print">
         <Link href="/account" style={{ display: "inline-flex", alignItems: "center" }}>
           <Image src="/brand/orbit-logo-reversed.png" alt="OrbitCargo" width={130} height={34} priority style={{ height: 34, width: "auto" }} />
         </Link>
@@ -83,6 +84,9 @@ export function PortalShell({
       <main className="portal-main" style={{ flex: 1, padding: "32px", background: "var(--surface-page)" }}>
         <div style={{ maxWidth: 960, margin: "0 auto" }}>{children}</div>
       </main>
+      <footer className="no-print" style={{ padding: "20px 32px 24px", background: "var(--surface-page)", borderTop: "1px solid var(--border-default)" }}>
+        <DeveloperCredit />
+      </footer>
     </div>
   );
 }

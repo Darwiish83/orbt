@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import type { Document, DocumentKind, Prisma, PrismaClient } from "@prisma/client";
-import { AuthorizationError } from "@/lib/errors";
+import { AuthorizationError, ValidationError } from "@/lib/errors";
 import { buildPage, normalizePage, type Page, type PageParams } from "@/lib/pagination";
 import { logAudit } from "@/modules/audit/log";
-import { isCustomerPrincipal, requirePermission, type AuthzUser } from "@/modules/authz/core";
-import { localStorage, type Storage } from "./storage";
+import { isCustomerPrincipal, requirePermission, requireScope, type AuthzUser } from "@/modules/authz/core";
+import { inTransaction } from "@/db/tx";
+import { dbStorage, type Storage } from "./storage";
 import { sanitizeFilename, validateUpload } from "./validation";
 
 export interface UploadDocumentInput {
@@ -34,11 +35,19 @@ export function assertDocumentAccess(
   requirePermission(actor, staffPermission);
 }
 
+/** Staff: a shipment's papers follow the shipment's country (as in the
+ * Documents list); a customer's own papers are shared across countries. */
+async function assertStaffDocumentScope(db: PrismaClient, actor: AuthzUser, doc: Pick<Document, "shipmentId">): Promise<void> {
+  if (isCustomerPrincipal(actor) || !doc.shipmentId) return;
+  const sh = await db.shipment.findUnique({ where: { id: doc.shipmentId }, select: { originCountry: true, businessYear: true } });
+  if (sh) requireScope(actor, { country: sh.originCountry, businessYear: sh.businessYear });
+}
+
 export async function uploadDocument(
   db: PrismaClient,
   actor: AuthzUser,
   input: UploadDocumentInput,
-  storage: Storage = localStorage,
+  storage?: Storage,
 ): Promise<Document> {
   // A customer uploads only to their own account; staff need documents:write.
   let customerId = input.customerId;
@@ -51,30 +60,31 @@ export async function uploadDocument(
   const { contentType, size } = validateUpload(input.buffer, input.declaredType);
   const checksum = createHash("sha256").update(input.buffer).digest("hex");
 
-  // Store first (random key — never the user filename), then record metadata.
-  const storageKey = await storage.put(input.buffer);
-
-  const doc = await db.document.create({
-    data: {
-      kind: input.kind,
-      storageKey,
-      filename: sanitizeFilename(input.filename),
-      contentType,
-      size,
-      checksum,
-      customerId,
-      shipmentId: input.shipmentId,
-      uploadedByUserId: actor.id,
-    },
+  // File and record are saved together: if either fails, neither is kept.
+  return inTransaction(db, async (tx) => {
+    const storageKey = await (storage ?? dbStorage(tx)).put(input.buffer);
+    const doc = await tx.document.create({
+      data: {
+        kind: input.kind,
+        storageKey,
+        filename: sanitizeFilename(input.filename),
+        contentType,
+        size,
+        checksum,
+        customerId,
+        shipmentId: input.shipmentId,
+        uploadedByUserId: actor.id,
+      },
+    });
+    await logAudit(tx, {
+      actorUserId: actor.id,
+      action: "document.upload",
+      entityType: "Document",
+      entityId: doc.id,
+      metadata: { kind: input.kind, size, contentType },
+    });
+    return doc;
   });
-  await logAudit(db, {
-    actorUserId: actor.id,
-    action: "document.upload",
-    entityType: "Document",
-    entityId: doc.id,
-    metadata: { kind: input.kind, size, contentType },
-  });
-  return doc;
 }
 
 /** Load a document for download, enforcing object-level access and returning
@@ -83,12 +93,13 @@ export async function getDocumentForDownload(
   db: PrismaClient,
   actor: AuthzUser,
   id: string,
-  storage: Storage = localStorage,
+  storage?: Storage,
 ): Promise<{ document: Document; buffer: Buffer } | null> {
   const document = await db.document.findUnique({ where: { id } });
   if (!document || document.deletedAt) return null;
   assertDocumentAccess(actor, document, "documents:read");
-  const buffer = await storage.get(document.storageKey);
+  await assertStaffDocumentScope(db, actor, document);
+  const buffer = await (storage ?? dbStorage(db)).get(document.storageKey);
   await logAudit(db, {
     actorUserId: actor.id,
     action: "document.download",
@@ -103,11 +114,11 @@ export async function getDocumentForDownload(
 export async function getDocumentByToken(
   db: PrismaClient,
   id: string,
-  storage: Storage = localStorage,
+  storage?: Storage,
 ): Promise<{ document: Document; buffer: Buffer } | null> {
   const document = await db.document.findUnique({ where: { id } });
   if (!document || document.deletedAt) return null;
-  const buffer = await storage.get(document.storageKey);
+  const buffer = await (storage ?? dbStorage(db)).get(document.storageKey);
   return { document, buffer };
 }
 
@@ -141,6 +152,9 @@ export async function listDocuments(
 
 export async function softDeleteDocument(db: PrismaClient, actor: AuthzUser, id: string): Promise<void> {
   requirePermission(actor, "documents:manage");
+  const doc = await db.document.findUnique({ where: { id } });
+  if (!doc || doc.deletedAt) throw new ValidationError("Document not found");
+  await assertStaffDocumentScope(db, actor, doc);
   await db.document.update({ where: { id }, data: { deletedAt: new Date() } });
   await logAudit(db, { actorUserId: actor.id, action: "document.delete", entityType: "Document", entityId: id });
 }

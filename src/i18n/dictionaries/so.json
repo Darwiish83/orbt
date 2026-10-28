@@ -1648,5 +1648,17 @@
   "Enter the phone number: 9 digits after +252 (e.g. 61 555 0100)": "Geli lambarka taleefanka: 9 god kadib +252 (tusaale 61 555 0100)",
   "This phone number is already registered": "Lambarkan taleefanka horay ayaa loo diiwaangeliyay",
   "This email is already registered. Log in with your Customer Reference.": "Iimaylkan horay ayaa loo diiwaangeliyay. Ku gal Tixraaca Macmiilkaaga.",
-  "9 digits after +252": "9 god kadib +252"
+  "9 digits after +252": "9 god kadib +252",
+  "Password must be at least 10 characters": "Furaha sirtu waa inuu ahaadaa ugu yaraan 10 xaraf",
+  "Password is too long": "Furaha sirtu aad buu u dheer yahay",
+  "Password must contain letters and numbers": "Furaha sirtu waa inuu lahaadaa xarfo iyo tirooyin",
+  "Password must not contain your email or ID": "Furaha sirtu waa inuusan ku jirin iimaylkaaga ama aqoonsigaaga",
+  "This password is too common. Choose another one": "Furahan sirta ah aad buu u caam yahay. Dooro mid kale",
+  "Choose a password different from the current one": "Dooro furo sir ah oo ka duwan kan hadda",
+  "At least 10 characters, with letters and numbers": "Ugu yaraan 10 xaraf, oo leh xarfo iyo tirooyin",
+  "All rights reserved.": "Xuquuqda oo dhan way dhowran tahay.",
+  "Designed & developed by": "Waxaa naqshadeeyay oo dhisay",
+  "Partial": "Qayb ahaan",
+  "Invoice PDF": "Biilka PDF",
+  "No invoices yet.": "Weli biil ma jiro."
 }

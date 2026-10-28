@@ -97,11 +97,11 @@ describe("customer first login / forgot password (Reference + Phone + Email → 
     expect(user.status).toBe("INVITED");
 
     const token = await verifyCustomerAccess(prisma, { email: "amina@shop.so", code: lastCode() });
-    const done = await completeSetPassword(prisma, { token, password: "new-pass-123", confirm: "new-pass-123" });
+    const done = await completeSetPassword(prisma, { token, password: "Harbour7Lamp2", confirm: "Harbour7Lamp2" });
     expect(done.customerRef).toBe("OR-3001");
-    expect((await verifyCustomerLogin(prisma, "OR-3001", "amina@shop.so", "new-pass-123"))?.id).toBe(user.id);
+    expect((await verifyCustomerLogin(prisma, "OR-3001", "amina@shop.so", "Harbour7Lamp2"))?.id).toBe(user.id);
     // The set-password token is single-use.
-    await expect(completeSetPassword(prisma, { token, password: "again-123", confirm: "again-123" })).rejects.toThrow(/expired/i);
+    await expect(completeSetPassword(prisma, { token, password: "Second9River4", confirm: "Second9River4" })).rejects.toThrow(/expired/i);
   });
 
   it("silently sends nothing on a wrong phone, wrong email, missing email on file, unknown or suspended customer", async () => {
@@ -197,8 +197,8 @@ describe("customer self-registration (Create New Account)", () => {
     expect(c.notifications[0]!.message).toContain("OR-3000");
     expect(c.notifications[0]!.status).toBe("SENT");
 
-    await completeSetPassword(prisma, { token, password: "amina-pass-1", confirm: "amina-pass-1" });
-    expect((await verifyCustomerLogin(prisma, "OR-3000", "amina@shop.so", "amina-pass-1"))?.id).toBe(c.user!.id);
+    await completeSetPassword(prisma, { token, password: "Kettle5Moon8", confirm: "Kettle5Moon8" });
+    expect((await verifyCustomerLogin(prisma, "OR-3000", "amina@shop.so", "Kettle5Moon8"))?.id).toBe(c.user!.id);
   });
 
   it("rejects missing fields and an email or phone that is already registered", async () => {
@@ -227,9 +227,9 @@ describe("staff Create Password (Employee ID → email code → password)", () =
     await requestStaffSetup(prisma, { employeeId: "emp-004", email: "OPS@orbit.so" }, send);
     expect(outbox[0]).toMatchObject({ to: "ops@orbit.so", purpose: "STAFF_SETUP" });
     const token = await verifyStaffSetup(prisma, { email: "ops@orbit.so", code: lastCode() });
-    const done = await completeSetPassword(prisma, { token, password: "ops-pass-123", confirm: "ops-pass-123" });
+    const done = await completeSetPassword(prisma, { token, password: "Window3Cedar6", confirm: "Window3Cedar6" });
     expect(done.employeeId).toBe("EMP-004");
-    expect((await verifyStaffLogin(prisma, "EMP-004", "ops@orbit.so", "ops-pass-123"))?.id).toBe(u.id);
+    expect((await verifyStaffLogin(prisma, "EMP-004", "ops@orbit.so", "Window3Cedar6"))?.id).toBe(u.id);
   });
 
   it("sends nothing for a wrong email, an inactive employee, or a customer's email", async () => {
@@ -255,9 +255,9 @@ describe("set password rules", () => {
     await staffUser("EMP-009", { email: "c@orbit.so" });
     await requestStaffSetup(prisma, { employeeId: "EMP-009", email: "c@orbit.so" }, send);
     const token = await verifyStaffSetup(prisma, { email: "c@orbit.so", code: lastCode() });
-    await expect(completeSetPassword(prisma, { token, password: "short", confirm: "short" })).rejects.toThrow(/at least 8/i);
-    await expect(completeSetPassword(prisma, { token, password: "long-enough", confirm: "different!" })).rejects.toThrow(/do not match/i);
-    await expect(completeSetPassword(prisma, { token, password: "long-enough", confirm: "long-enough" })).resolves.toBeTruthy();
+    await expect(completeSetPassword(prisma, { token, password: "short", confirm: "short" })).rejects.toThrow(/at least 10/i);
+    await expect(completeSetPassword(prisma, { token, password: "Garden4Stone9", confirm: "different!" })).rejects.toThrow(/do not match/i);
+    await expect(completeSetPassword(prisma, { token, password: "Garden4Stone9", confirm: "Garden4Stone9" })).resolves.toBeTruthy();
   });
 });
 

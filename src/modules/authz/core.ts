@@ -19,7 +19,6 @@ export interface AuthzUser {
   employeeId: string | null;
   customerId: string | null;
   sessionEpoch: number;
-  mfaEnabled: boolean;
   isSuperAdmin: boolean;
   roleKeys: string[];
   permissions: Set<string>;
@@ -88,7 +87,6 @@ export async function loadAuthzUser(db: PrismaClient, userId: string): Promise<A
     employeeId: user.employeeId,
     customerId: user.customerId,
     sessionEpoch: user.sessionEpoch,
-    mfaEnabled: user.mfaEnabled,
     isSuperAdmin,
     roleKeys,
     permissions,

@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { Icon } from "@/ui/primitives";
 import { useT } from "@/i18n/I18nProvider";
 import { LangToggle } from "@/i18n/LangToggle";
+import { DeveloperCredit } from "@/components/DeveloperCredit";
 import type { AdminNavItem } from "./adminNav";
 import { ScopeSelect, type ScopeOptions } from "./ScopeSelect";
 
@@ -139,6 +140,9 @@ export function AdminShell({
               </button>
             </form>
           )}
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,.08)" }}>
+            <DeveloperCredit tone="dark" compact />
+          </div>
         </div>
       </aside>
 

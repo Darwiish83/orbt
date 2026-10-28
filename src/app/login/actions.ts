@@ -45,7 +45,6 @@ export async function loginAction(_prev: ActionResult | null, f: FormData): Prom
         employeeId: id,
         email: str(f, "email"),
         password: str(f, "password"),
-        code: str(f, "code") || undefined,
         redirectTo: "/dashboard",
       });
     } else {
@@ -104,11 +103,8 @@ export async function verifySignupAction(input: { email: string; code: string })
   }
 }
 
-/**
- * Final step: set the password, then sign straight in. Staff with two-factor
- * on must sign in with their authenticator code instead (signInRequired).
- */
-export async function setPasswordAction(input: { token: string; password: string; confirm: string }): Promise<ActionResult<{ signInRequired?: boolean }>> {
+/** Final step: set the password, then sign straight in. */
+export async function setPasswordAction(input: { token: string; password: string; confirm: string }): Promise<ActionResult> {
   let r: Awaited<ReturnType<typeof completeSetPassword>>;
   try {
     r = await completeSetPassword(prisma, input);
@@ -124,7 +120,7 @@ export async function setPasswordAction(input: { token: string; password: string
       return { ok: false, error: "This step has expired. Please start again." };
     }
   } catch (e) {
-    if (e instanceof AuthError) return r.employeeId ? { ok: true, signInRequired: true } : { ok: false, error: BAD_LOGIN };
+    if (e instanceof AuthError) return { ok: false, error: BAD_LOGIN };
     throw e;
   }
   return { ok: true };

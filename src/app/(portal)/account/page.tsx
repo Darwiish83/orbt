@@ -1,5 +1,5 @@
 import type { ShipmentStatus } from "@prisma/client";
-import { prisma } from "@/db/client";
+import { withUserDb } from "@/db/scoped";
 import { listShipments } from "@/modules/shipments/service";
 import { publicStatusLabel } from "@/modules/shipments/stateMachine";
 import { requireUser } from "@/modules/authz/session";
@@ -16,7 +16,7 @@ const TONE: Record<ShipmentStatus, BadgeTone> = {
 
 export default async function AccountShipmentsPage() {
   const user = await requireUser();
-  const { items } = await listShipments(prisma, user, { pageSize: 50 });
+  const { items } = await withUserDb(user, (db) => listShipments(db, user, { pageSize: 50 }));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>

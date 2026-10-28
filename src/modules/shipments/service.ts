@@ -155,6 +155,8 @@ export async function changeShipmentStatus(
   const shipment = await db.shipment.findUnique({ where: { id: shipmentId } });
   if (!shipment) throw new ValidationError("Shipment not found");
   requireScope(actor, { country: shipment.originCountry, businessYear: shipment.businessYear });
+  // A closed year is closed for everything, status included (ADR-031).
+  await assertYearOpen(db, shipment.originCountry, shipment.businessYear);
 
   // Idempotency: an event already recorded under this key is a no-op.
   if (opts.idempotencyKey) {

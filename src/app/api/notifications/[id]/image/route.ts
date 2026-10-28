@@ -1,4 +1,4 @@
-import { prisma } from "@/db/client";
+import { withUserDb } from "@/db/scoped";
 import { getSessionUser } from "@/modules/authz/session";
 import { getNotificationImage } from "@/modules/notifications/announcements";
 
@@ -8,7 +8,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const user = await getSessionUser();
   if (!user) return new Response("Unauthorized", { status: 401 });
   try {
-    const { buffer, contentType } = await getNotificationImage(prisma, user, id);
+    const { buffer, contentType } = await withUserDb(user, (db) => getNotificationImage(db, user, id));
     return new Response(new Uint8Array(buffer), {
       headers: {
         "Content-Type": contentType,

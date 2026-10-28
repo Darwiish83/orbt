@@ -24,17 +24,18 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 
-# Prisma CLI + schema/migrations so `migrate deploy` can run at startup.
+# Prisma CLI + schema/migrations for the separate `migrate` step (compose
+# profile "migrate"), which runs as orbit_owner. The app itself never holds
+# the owner's credentials (ADR-029).
 COPY --from=build /app/node_modules/prisma ./node_modules/prisma
 COPY --from=build /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=build /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
 COPY --from=build /app/prisma ./prisma
 
-# Private document storage lives on a mounted volume (see compose).
-RUN mkdir -p /app/storage/documents && chown -R nextjs:nodejs /app/storage
+# Documents and images are stored in PostgreSQL (ADR-030): no file volume.
 USER nextjs
 EXPOSE 3000
 
-# Apply migrations, then start the server. Destructive migrations are never
-# auto-applied (migrate deploy only runs committed, forward migrations).
-CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node server.js"]
+# Start the server only. Migrations are a separate, deliberate step:
+#   docker compose -f docker-compose.prod.yml --profile migrate run --rm migrate
+CMD ["node", "server.js"]

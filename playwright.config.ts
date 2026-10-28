@@ -9,9 +9,12 @@ import { e2eEnv } from "./tests/e2e/env";
 // E2E_PORT lets the suite run while another dev server holds :3100; a
 // non-default port also gets its own build dir (NEXT_DIST_DIR) to avoid sharing .next.
 const PORT = Number(process.env.E2E_PORT ?? 3100);
-// The suite has its own database and document folder: test accounts and
-// uploads never land in the real development data.
+// The suite has its own database (documents are stored in it, ADR-030): test
+// accounts and uploads never land in the real development data.
+// Same least-privilege roles as production (ADR-029): the app as orbit_runtime,
+// customer requests as orbit_portal.
 const E2E_DATABASE_URL = e2eEnv("E2E_DATABASE_URL");
+const E2E_PORTAL_DATABASE_URL = e2eEnv("E2E_PORTAL_DATABASE_URL");
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -43,7 +46,7 @@ export default defineConfig({
     command: `npm run dev -- -p ${PORT}`,
     env: {
       DATABASE_URL: E2E_DATABASE_URL,
-      DOCUMENTS_DIR: "storage/e2e-documents",
+      PORTAL_DATABASE_URL: E2E_PORTAL_DATABASE_URL,
       ...(PORT === 3100 ? {} : { NEXT_DIST_DIR: ".next-e2e" }),
     },
     url: `http://localhost:${PORT}`,

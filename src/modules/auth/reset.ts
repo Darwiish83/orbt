@@ -47,6 +47,13 @@ export async function createSetPasswordToken(db: PrismaClient, userId: string, t
   return raw;
 }
 
+/** The user a still-valid (unused, unexpired) token belongs to, without consuming it. */
+export async function peekResetToken(db: PrismaClient, rawToken: string): Promise<string | null> {
+  const token = await db.passwordResetToken.findUnique({ where: { tokenHash: hashToken(rawToken) } });
+  if (!token || token.usedAt || token.expiresAt.getTime() < Date.now()) return null;
+  return token.userId;
+}
+
 /**
  * Consume a reset token and set the new password. Returns the user id. Validates existence,
  * expiry and single-use in one transaction. Throws on any invalid token.

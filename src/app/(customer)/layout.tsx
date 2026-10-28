@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { LangToggle } from "@/i18n/LangToggle";
+import { DeveloperCredit } from "@/components/DeveloperCredit";
 
 /**
  * Customer-facing layout: navy top bar with the reversed logo, matching the
@@ -34,6 +35,9 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
         <LangToggle dark />
       </header>
       <main style={{ flex: 1 }}>{children}</main>
+      <footer style={{ padding: "20px 32px 24px", borderTop: "1px solid var(--border-default)" }}>
+        <DeveloperCredit />
+      </footer>
     </div>
   );
 }

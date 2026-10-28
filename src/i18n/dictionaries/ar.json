@@ -1648,5 +1648,17 @@
   "Enter the phone number: 9 digits after +252 (e.g. 61 555 0100)": "أدخل رقم الهاتف: 9 أرقام بعد ‎+252 (مثال 61 555 0100)",
   "This phone number is already registered": "رقم الهاتف هذا مسجّل مسبقًا",
   "This email is already registered. Log in with your Customer Reference.": "هذا البريد الإلكتروني مسجّل مسبقًا. سجّل الدخول بمرجع العميل.",
-  "9 digits after +252": "9 أرقام بعد ‎+252"
+  "9 digits after +252": "9 أرقام بعد ‎+252",
+  "Password must be at least 10 characters": "يجب أن تتكون كلمة المرور من 10 أحرف على الأقل",
+  "Password is too long": "كلمة المرور طويلة جدًا",
+  "Password must contain letters and numbers": "يجب أن تحتوي كلمة المرور على أحرف وأرقام",
+  "Password must not contain your email or ID": "يجب ألا تحتوي كلمة المرور على بريدك الإلكتروني أو رقمك",
+  "This password is too common. Choose another one": "كلمة المرور هذه شائعة جدًا. اختر غيرها",
+  "Choose a password different from the current one": "اختر كلمة مرور مختلفة عن الحالية",
+  "At least 10 characters, with letters and numbers": "10 أحرف على الأقل، تتضمن أحرفًا وأرقامًا",
+  "All rights reserved.": "جميع الحقوق محفوظة.",
+  "Designed & developed by": "تصميم وتطوير",
+  "Partial": "جزئي",
+  "Invoice PDF": "الفاتورة PDF",
+  "No invoices yet.": "لا توجد فواتير بعد."
 }

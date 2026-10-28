@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/db/client";
+import { withUserDb } from "@/db/scoped";
 import { AuthorizationError, ValidationError } from "@/lib/errors";
 import { requireUser } from "@/modules/authz/session";
 import { getInvoiceDocument } from "@/modules/finance/shipmentFinance";
@@ -12,7 +13,8 @@ export const metadata = { title: "Invoice" };
 export default async function PrintInvoicePage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
   const { id } = await params;
-  const inv = await getInvoiceDocument(prisma, user, id).catch((e) => {
+  // A customer reads through their own connection (Row-Level Security, ADR-029).
+  const inv = await withUserDb(user, (db) => getInvoiceDocument(db, user, id)).catch((e) => {
     if (e instanceof AuthorizationError || e instanceof ValidationError) return null;
     throw e;
   });

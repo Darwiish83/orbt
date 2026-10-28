@@ -17,6 +17,23 @@ services:
       timeout: 5s
       retries: 10
 
+  # Migrations run as orbit_owner, on demand only:
+  #   docker compose -f docker-compose.prod.yml --profile migrate run --rm migrate
+  migrate:
+    build:
+      context: .
+      target: runner
+    profiles: ["migrate"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set in .env}
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?set in .env}
+    command: ["node_modules/.bin/prisma", "migrate", "deploy"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # The app gets only the least-privilege roles (ADR-029) and refuses to start
+  # on an over-privileged one. Documents are stored in the database (ADR-030).
   app:
     build:
       context: .
@@ -25,17 +42,15 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:?set in .env}
+      PORTAL_DATABASE_URL: ${PORTAL_DATABASE_URL:?set in .env}
       AUTH_SECRET: ${AUTH_SECRET:?set in .env}
       APP_URL: ${APP_URL:?set in .env}
-      DOCUMENTS_DIR: /app/storage/documents
     depends_on:
       db:
         condition: service_healthy
+    # Only the reverse proxy on this machine reaches the app.
     ports:
-      - "3000:3000"
-    volumes:
-      - documents:/app/storage/documents
+      - "127.0.0.1:3000:3000"
 
 volumes:
   pgdata:
-  documents:

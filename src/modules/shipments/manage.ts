@@ -3,7 +3,7 @@ import { ValidationError } from "@/lib/errors";
 import { assertYearOpen } from "@/modules/accounting/periods";
 import { logAudit } from "@/modules/audit/log";
 import { displayShipmentCode } from "@/modules/authz/adminScope";
-import { requirePermission, requireScope, type AuthzUser } from "@/modules/authz/core";
+import { allowedCountries, requirePermission, requireScope, type AuthzUser } from "@/modules/authz/core";
 import { lineMeasure, lineTotal } from "@/modules/finance/charges";
 import { dec, round2, sum } from "@/modules/finance/money";
 import { publicStatusLabel, transitionsFor } from "./stateMachine";
@@ -379,9 +379,12 @@ export async function notifyShipmentLine(db: PrismaClient, actor: AuthzUser, lin
 export async function searchCustomers(db: PrismaClient, actor: AuthzUser, q: string) {
   requirePermission(actor, "customers:read");
   const term = q.trim();
+  // Same country scope as the Customers list: a search never widens it.
+  const countries = allowedCountries(actor);
   const customers = await db.customer.findMany({
     where: {
       status: "ACTIVE",
+      ...(countries !== null ? { AND: [{ OR: [{ country: { in: countries } }, { country: null }] }] } : {}),
       ...(term
         ? {
             OR: [

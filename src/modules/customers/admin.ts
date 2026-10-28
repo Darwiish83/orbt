@@ -2,9 +2,10 @@ import type { Customer, Prisma, PrismaClient } from "@prisma/client";
 import { ValidationError } from "@/lib/errors";
 import { logAudit } from "@/modules/audit/log";
 import { displayShipmentCode } from "@/modules/authz/adminScope";
-import { allowedCountries, requirePermission, type AuthzUser } from "@/modules/authz/core";
+import { requirePermission, type AuthzUser } from "@/modules/authz/core";
 import { round2, sum } from "@/modules/finance/money";
 import { levelFromVolume, type CustomerLevel } from "./level";
+import { customerScopeWhere } from "./service";
 
 /**
  * Admin → Customers (spec B5 / revised prompt §6). Customers are shared by
@@ -14,10 +15,7 @@ import { levelFromVolume, type CustomerLevel } from "./level";
 
 const s = (v: Prisma.Decimal | null | undefined) => (v == null ? "0" : v.toString());
 
-function scopeWhere(actor: AuthzUser): Prisma.CustomerWhereInput {
-  const countries = allowedCountries(actor);
-  return countries === null ? {} : { OR: [{ country: { in: countries } }, { country: null }] };
-}
+const scopeWhere = customerScopeWhere;
 
 export interface AdminCustomerRow {
   id: string;

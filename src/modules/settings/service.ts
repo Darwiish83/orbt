@@ -1,8 +1,10 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { assertStrongPassword } from "@/modules/auth/passwordPolicy";
 import { COMPANY } from "@/config/company";
-import { AuthorizationError, ValidationError } from "@/lib/errors";
+import { ValidationError } from "@/lib/errors";
 import { logAudit } from "@/modules/audit/log";
 import { setPassword } from "@/modules/auth/accounts";
+import { assertNotRateLimited, recordAttempt } from "@/modules/auth/rateLimit";
 import { verifyPassword } from "@/modules/auth/password";
 import { requirePermission, type AuthzUser } from "@/modules/authz/core";
 import { isoOf } from "@/ui/kit/countries";
@@ -149,10 +151,17 @@ export async function removeCountry(db: PrismaClient, actor: AuthzUser, countryI
 
 /** Change your own password (Security section). */
 export async function changeOwnPassword(db: PrismaClient, actor: AuthzUser, current: string, next: string, confirm: string) {
-  if (next !== confirm) throw new ValidationError("Passwords do not match");
-  if (next.length < 8) throw new ValidationError("Password must be at least 8 characters");
-  const user = await db.user.findUnique({ where: { id: actor.id } });
-  if (!user?.passwordHash || !(await verifyPassword(user.passwordHash, current))) throw new AuthorizationError("Current password is wrong");
+  const user = await db.user.findUnique({ where: { id: actor.id }, include: { employee: { select: { code: true } } } });
+  assertStrongPassword(next, confirm, { email: user?.email, id: user?.employee?.code });
+  if (next === current) throw new ValidationError("Choose a password different from the current one");
+  // Someone holding an open session can't guess the current password: 5 wrong
+  // tries in 15 minutes and the form stops for a while.
+  const key = `user:${actor.id}`;
+  await assertNotRateLimited(db, key, "password_change");
+  if (!user?.passwordHash || !(await verifyPassword(user.passwordHash, current))) {
+    await recordAttempt(db, { identifier: key, kind: "password_change", success: false });
+    throw new ValidationError("Current password is wrong");
+  }
   await setPassword(db, actor.id, next);
   await logAudit(db, { actorUserId: actor.id, action: "auth.password_change", entityType: "User", entityId: actor.id });
 }

@@ -4,7 +4,9 @@
 import { useActionState, useState, useTransition, type ReactNode } from "react";
 import { useT } from "@/i18n/I18nProvider";
 import { localPhoneDigits, PHONE_REQUIRED } from "@/modules/customers/phone";
+import { PASSWORD_MIN, PW_MISMATCH, PW_NEEDS_MIX, PW_TOO_SHORT } from "@/modules/auth/passwordPolicy";
 import { LangToggle } from "@/i18n/LangToggle";
+import { DeveloperCredit } from "@/components/DeveloperCredit";
 import { Overline, Seg } from "@/ui/kit";
 import { Button, Card, Icon, Input } from "@/ui/primitives";
 import {
@@ -160,17 +162,11 @@ export function Login() {
           setStep("setpw");
         });
   const savePw = () => {
-    if (pw.length < 8) return setErr(t("Password must be at least 8 characters"));
-    if (pw !== pw2) return setErr(t("Passwords do not match"));
-    run(() => setPasswordAction({ token, password: pw, confirm: pw2 }), (r) => {
-      if (!r.signInRequired) return;
-      // Two-factor staff: back to Sign in to enter the authenticator code.
-      setAccess(false);
-      setStep("form");
-      setPw("");
-      setPw2("");
-      setNotice(t("Password created. Sign in with your authenticator code."));
-    });
+    // Quick checks here; the server enforces the full password rules.
+    if (pw.length < PASSWORD_MIN) return setErr(t(PW_TOO_SHORT));
+    if (pw !== pw2) return setErr(t(PW_MISMATCH));
+    if (!/[A-Za-z]/.test(pw) || !/\d/.test(pw)) return setErr(t(PW_NEEDS_MIX));
+    run(() => setPasswordAction({ token, password: pw, confirm: pw2 }), () => undefined);
   };
   const backToForm = () => {
     setStep("form");
@@ -300,20 +296,8 @@ export function Login() {
                       autoComplete="current-password"
                       required
                       leadingIcon={<Icon name="Lock" size={16} />}
-                      error={loginState && !loginState.ok && !staff ? t(loginState.error) : undefined}
+                      error={loginState && !loginState.ok ? t(loginState.error) : undefined}
                     />
-                    {staff && (
-                      <Input
-                        name="code"
-                        inputMode="numeric"
-                        autoComplete="one-time-code"
-                        label={t("Authenticator code")}
-                        hint={t("Only if two-factor is enabled on your account")}
-                        leadingIcon={<Icon name="ShieldCheck" size={16} />}
-                        inputStyle={{ fontFamily: "var(--font-mono)", letterSpacing: "0.2em" }}
-                        error={loginState && !loginState.ok ? t(loginState.error) : undefined}
-                      />
-                    )}
                     <Button type="submit" fullWidth size="l" disabled={loginPending} trailingIcon={<Icon name="ArrowRight" size={16} />}>
                       {t("Log in")}
                     </Button>
@@ -478,7 +462,7 @@ export function Login() {
                   value={pw}
                   onChange={(e) => setPw(e.target.value)}
                   leadingIcon={<Icon name="Lock" size={16} />}
-                  hint={t("At least 8 characters")}
+                  hint={t("At least 10 characters, with letters and numbers")}
                 />
                 <Input
                   label={t("Confirm Password")}
@@ -507,7 +491,9 @@ export function Login() {
               </div>
             ))}
           </div>
-          <div style={{ height: 12 }} />
+          <div style={{ padding: "8px 0 16px" }}>
+            <DeveloperCredit />
+          </div>
         </div>
       </main>
     </div>

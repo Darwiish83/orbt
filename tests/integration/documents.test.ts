@@ -7,7 +7,7 @@ import {
   softDeleteDocument,
   uploadDocument,
 } from "@/modules/documents/service";
-import { generateStorageKey, localStorage } from "@/modules/documents/storage";
+import { dbStorage, diskReader, generateStorageKey } from "@/modules/documents/storage";
 import { createSignedToken, verifySignedToken } from "@/modules/documents/signing";
 import { sniffContentType, validateUpload } from "@/modules/documents/validation";
 import { assertTestDatabase, prisma, resetDb, testPhone } from "./helpers";
@@ -66,16 +66,38 @@ describe("upload validation", () => {
   });
 });
 
-describe("storage safety", () => {
-  it("generates sharded random keys and round-trips bytes", async () => {
+describe("storage safety (files in the database, ADR-030)", () => {
+  it("generates sharded random keys and round-trips bytes through the database", async () => {
     const key = generateStorageKey();
     expect(key).toMatch(/^[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{32}$/);
-    const stored = await localStorage.put(PDF);
-    expect(await localStorage.get(stored)).toEqual(PDF);
+    const stored = await dbStorage(prisma).put(PDF);
+    expect(await dbStorage(prisma).get(stored)).toEqual(PDF);
+    expect(await prisma.storedFile.count()).toBe(1);
   });
 
-  it("refuses a traversal key", async () => {
-    await expect(localStorage.get("../../../../etc/passwd")).rejects.toThrow(/invalid storage key/i);
+  it("the database refuses a wrong hash, a wrong size, a filename key, and any change or delete", async () => {
+    const good = { key: generateStorageKey(), data: new Uint8Array(PDF), size: PDF.length };
+    const hash = (await import("node:crypto")).createHash("sha256").update(PDF).digest("hex");
+    await expect(prisma.storedFile.createMany({ data: [{ ...good, sha256: "0".repeat(64) }] })).rejects.toThrow(/sha256_matches/);
+    await expect(prisma.storedFile.createMany({ data: [{ ...good, size: 1, sha256: hash }] })).rejects.toThrow(/size_matches/);
+    await expect(prisma.storedFile.createMany({ data: [{ ...good, key: "../../etc/passwd", sha256: hash }] })).rejects.toThrow(/key_format/);
+    await prisma.storedFile.createMany({ data: [{ ...good, sha256: hash }] });
+    await expect(prisma.$executeRaw`UPDATE "StoredFile" SET "data" = decode('00', 'hex') WHERE "key" = ${good.key}`).rejects.toThrow(/permission denied|not allowed/i);
+    await expect(prisma.$executeRaw`DELETE FROM "StoredFile" WHERE "key" = ${good.key}`).rejects.toThrow(/permission denied|not allowed/i);
+    expect(await dbStorage(prisma).get(good.key)).toEqual(PDF);
+  });
+
+  it("a document that fails to save leaves no file behind (one transaction)", async () => {
+    const admin = await superAdmin();
+    await expect(
+      uploadDocument(prisma, admin, { buffer: PDF, filename: "x.pdf", declaredType: "application/pdf", kind: "OTHER", shipmentId: "no-such-shipment" }),
+    ).rejects.toThrow();
+    expect(await prisma.storedFile.count()).toBe(0);
+    await expect(dbStorage(prisma).get(generateStorageKey())).rejects.toThrow(/not found/i);
+  });
+
+  it("the old folder reader refuses a traversal key", async () => {
+    await expect(diskReader().get("../../../../etc/passwd")).rejects.toThrow(/invalid storage key/i);
   });
 });
 

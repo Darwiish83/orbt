@@ -29,7 +29,7 @@ import { addShipmentPayment, createShipmentInvoice } from "@/modules/finance/shi
 import { dec } from "@/modules/finance/money";
 import { addShipmentLine, createShipment } from "@/modules/shipments/service";
 import { createEmployee } from "@/modules/users/admin";
-import { assertTestDatabase, prisma, resetDb, testPhone } from "./helpers";
+import { assertTestDatabase, ownerDb, prisma, resetDb, testPhone } from "./helpers";
 
 beforeAll(() => assertTestDatabase());
 beforeEach(() => resetDb());
@@ -321,7 +321,8 @@ describe("period closing", () => {
     const debt = (await listDebts(prisma, admin, next)).rows[0]!;
     await at("2027-02-01", () => returnDebt(prisma, admin, { debtId: debt.id, amount: "1", bankId: salaam.id, returnedAt: D("2027-01-30") }));
     await expect(reopenPeriod(prisma, admin, TR, "YEAR")).rejects.toThrow(/already returned/);
-    await prisma.debtReturn.deleteMany({});
+    // The app can never delete a return (ADR-029); the fixture removes it as the owner.
+    await ownerDb.debtReturn.deleteMany({});
 
     await reopenPeriod(prisma, admin, TR, "YEAR");
     expect(await prisma.openingEntry.count({ where: { ...next, reversedAt: null } })).toBe(0);

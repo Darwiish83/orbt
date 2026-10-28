@@ -301,6 +301,8 @@ describe("reminders and demurrage", () => {
     const { admin, w1, b } = await world();
     const i = await createShipmentInvoice(prisma, admin, { shipmentId: w1.id, customerId: b.id, billedMeasure: "50", baseRate: "6" });
     const now = new Date("2026-10-20T12:00:00Z");
+    // The database only allows the real path (ADR-029): Departed → Transit → Arrived.
+    for (const status of ["DEPARTED", "IN_TRANSIT"] as const) await prisma.shipment.update({ where: { id: w1.id }, data: { status } });
     await prisma.shipment.update({ where: { id: w1.id }, data: { status: "ARRIVED", arrivedAt: new Date("2026-10-10T12:00:00Z") } });
 
     const cfg = { freeDays: 3, ratePerDay: "5" };

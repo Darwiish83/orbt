@@ -14,9 +14,13 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// ADR-029: the app connects as the least-privilege runtime role (DATABASE_URL);
+// migrations run as the owner role (MIGRATION_DATABASE_URL). See
+// scripts/db-setup-roles.ts.
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("MIGRATION_DATABASE_URL")
 }
 
 // ------------------------------------------------------------------ enums
@@ -671,6 +675,19 @@ model PaymentAllocation {
 }
 
 // ----------------------------------------------------------------- documents
+
+// File bytes kept inside PostgreSQL (owner 2026-10-27): documents and
+// announcement images travel with every database backup and server move.
+// `key` is the random server-generated key in Document.storageKey /
+// Notification.imageKey. Append-only (ADR-030): a file is never changed or
+// deleted by the app; `sha256` is checked on every read.
+model StoredFile {
+  key       String   @id
+  data      Bytes
+  size      Int
+  sha256    String
+  createdAt DateTime @default(now())
+}
 
 model Document {
   id               String             @id @default(cuid())

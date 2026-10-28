@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/db/client";
+import { withUserDb } from "@/db/scoped";
 import { getSessionUser } from "@/modules/authz/session";
 import { getDocumentByToken, getDocumentForDownload } from "@/modules/documents/service";
 import { verifySignedToken } from "@/modules/documents/signing";
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const user = await getSessionUser();
     if (!user) return new Response("Unauthorized", { status: 401 });
     try {
-      result = await getDocumentForDownload(prisma, user, id);
+      result = await withUserDb(user, (db) => getDocumentForDownload(db, user, id));
     } catch {
       return new Response("Forbidden", { status: 403 });
     }

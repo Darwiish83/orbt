@@ -2,7 +2,8 @@ import type { Notification, Prisma, PrismaClient } from "@prisma/client";
 import { AuthorizationError, ValidationError } from "@/lib/errors";
 import { logAudit } from "@/modules/audit/log";
 import { isCustomerPrincipal, requirePermission, type AuthzUser } from "@/modules/authz/core";
-import { localStorage } from "@/modules/documents/storage";
+import { inTransaction } from "@/db/tx";
+import { dbStorage } from "@/modules/documents/storage";
 import { validateUpload } from "@/modules/documents/validation";
 
 /**
@@ -38,22 +39,22 @@ export async function createAnnouncement(db: PrismaClient, actor: AuthzUser, inp
   if (dated && (!input.lastDay || !input.departureDate)) throw new ValidationError("Enter the last day and the departure date");
   if (dated && input.lastDay! > input.departureDate!) throw new ValidationError("The last day must be on or before the departure date");
 
-  let imageKey: string | null = null;
-  let imageType: string | null = null;
+  let image: { buffer: Buffer; type: string } | null = null;
   if (input.image) {
     if (input.image.buffer.length > MAX_IMAGE) throw new ValidationError("The image must be 2 MB or smaller");
     const v = validateUpload(input.image.buffer, input.image.contentType);
     if (!v.contentType.startsWith("image/")) throw new ValidationError("Upload a PNG, JPEG or WebP image");
-    imageKey = await localStorage.put(input.image.buffer);
-    imageType = v.contentType;
+    image = { buffer: input.image.buffer, type: v.contentType };
   }
 
   const scheduled = !!input.sendAt && input.sendAt.getTime() > Date.now();
   const details: Prisma.InputJsonValue = dated
     ? { lastDay: input.lastDay!, departureDate: input.departureDate!, origin: input.origin?.trim() || null, destination: input.destination?.trim() || "Mogadishu" }
     : {};
-  try {
-    const n = await db.notification.create({
+  // Image and announcement are saved together (ADR-030): if either fails, neither is kept.
+  return inTransaction(db, async (tx) => {
+    const imageKey = image ? await dbStorage(tx).put(image.buffer) : null;
+    const n = await tx.notification.create({
       data: {
         audience: "ALL",
         type: ANNOUNCEMENT_TYPE[input.type],
@@ -61,19 +62,16 @@ export async function createAnnouncement(db: PrismaClient, actor: AuthzUser, inp
         message,
         details,
         imageKey,
-        imageType,
+        imageType: image?.type ?? null,
         status: scheduled ? "SCHEDULED" : "SENT",
         scheduledAt: scheduled ? input.sendAt : null,
         sentAt: scheduled ? null : new Date(),
         createdByUserId: actor.id,
       },
     });
-    await logAudit(db, { actorUserId: actor.id, action: "announcement.create", entityType: "Notification", entityId: n.id, metadata: { type: input.type, scheduled } });
+    await logAudit(tx, { actorUserId: actor.id, action: "announcement.create", entityType: "Notification", entityId: n.id, metadata: { type: input.type, scheduled } });
     return n;
-  } catch (e) {
-    if (imageKey) await localStorage.delete(imageKey);
-    throw e;
-  }
+  });
 }
 
 /** Publish announcements whose send time has come. Idempotent. */
@@ -128,8 +126,9 @@ export async function getNotificationImage(db: PrismaClient, actor: AuthzUser, i
   const n = await db.notification.findUnique({ where: { id } });
   if (!n?.imageKey || !n.imageType) throw new ValidationError("Not found");
   if (isCustomerPrincipal(actor)) {
-    const visible = n.status === "SENT" && (n.audience === "ALL" || n.customerId === actor.customerId);
+    const live = n.status === "SENT" || (n.status === "SCHEDULED" && !!n.scheduledAt && n.scheduledAt <= new Date());
+    const visible = live && (n.audience === "ALL" || n.customerId === actor.customerId);
     if (!visible) throw new AuthorizationError("Not allowed");
   } else requirePermission(actor, "notifications:read");
-  return { buffer: await localStorage.get(n.imageKey), contentType: n.imageType };
+  return { buffer: await dbStorage(db).get(n.imageKey), contentType: n.imageType };
 }

@@ -254,4 +254,9 @@ html[dir="rtl"] .admin-sidebar {
     padding: 0;
     background: #fff;
   }
+  /* Customer papers print without the portal around them. */
+  .portal-main {
+    padding: 0 !important;
+    background: #fff !important;
+  }
 }

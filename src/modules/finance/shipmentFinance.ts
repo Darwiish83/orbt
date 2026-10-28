@@ -2,7 +2,7 @@ import type { ChargeLineItem, Invoice, Prisma, PrismaClient, Shipment, ShipmentL
 import { AuthorizationError, ValidationError } from "@/lib/errors";
 import { logAudit } from "@/modules/audit/log";
 import { displayShipmentCode } from "@/modules/authz/adminScope";
-import { requirePermission, requireScope, type AuthzUser } from "@/modules/authz/core";
+import { isCustomerPrincipal, requirePermission, requireScope, type AuthzUser } from "@/modules/authz/core";
 import { assertOpen, assertYearOpen } from "@/modules/accounting/periods";
 import { buildSpecInvoice, lineMeasure, type SpecInvoiceInput } from "./charges";
 import { createInvoice, recomputeInvoice } from "./invoices";
@@ -516,9 +516,21 @@ export interface InvoiceDocument {
   balance: string;
 }
 
-/** Everything the invoice paper / Edit dialog needs (staff, scoped). */
+/** A customer's own live invoice, or "not found" — never a hint that another
+ * customer's invoice exists. */
+async function ownInvoice(db: Db, actor: AuthzUser, invoiceId: string) {
+  const invoice = await db.invoice.findFirst({
+    where: { id: invoiceId, customerId: actor.customerId ?? "__none__", status: { not: "VOID" } },
+    include: { shipment: true, lines: true },
+  });
+  if (!invoice?.shipment) throw new ValidationError("Invoice not found");
+  return invoice as typeof invoice & { shipment: Shipment };
+}
+
+/** Everything the invoice paper / Edit dialog needs: staff (scoped), or the
+ * customer it belongs to (download / print in the portal). */
 export async function getInvoiceDocument(db: PrismaClient, actor: AuthzUser, invoiceId: string): Promise<InvoiceDocument> {
-  const inv = await scopedInvoice(db, actor, invoiceId, "invoices:read");
+  const inv = isCustomerPrincipal(actor) ? await ownInvoice(db, actor, invoiceId) : await scopedInvoice(db, actor, invoiceId, "invoices:read");
   const customer = await db.customer.findUniqueOrThrow({ where: { id: inv.customerId } });
   const order: ChargeLineItem["category"][] = ["FREIGHT", "QUALITY", "BRAND", "FATURA", "LOCAL_DELIVERY", "OTHER", "DEMURRAGE"];
   const lines = [...inv.lines].sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
@@ -559,16 +571,20 @@ export interface PaymentReceiptDoc {
   reversed: boolean;
 }
 
+/** A payment receipt: staff (payments:read, scoped), or the customer who paid
+ * (their own, not reversed). */
 export async function getPaymentReceipt(db: PrismaClient, actor: AuthzUser, paymentId: string): Promise<PaymentReceiptDoc> {
-  requirePermission(actor, "payments:read");
+  const customer = isCustomerPrincipal(actor);
+  if (!customer) requirePermission(actor, "payments:read");
   const payment = await db.payment.findUnique({
     where: { id: paymentId },
     include: { customer: true, bank: true, receipt: true, allocations: { include: { invoice: { include: { shipment: true } } } } },
   });
   if (!payment || !payment.receipt) throw new ValidationError("Receipt not found");
+  if (customer && (payment.customerId !== actor.customerId || payment.reversedAt)) throw new ValidationError("Receipt not found");
   const inv = payment.allocations[0]?.invoice;
   if (!inv?.shipment) throw new AuthorizationError("Receipt is not linked to a shipment invoice");
-  requireScope(actor, { country: inv.shipment.originCountry, businessYear: inv.shipment.businessYear });
+  if (!customer) requireScope(actor, { country: inv.shipment.originCountry, businessYear: inv.shipment.businessYear });
   return {
     receiptNo: payment.receipt.number,
     amount: s(payment.amount),
@@ -580,4 +596,25 @@ export async function getPaymentReceipt(db: PrismaClient, actor: AuthzUser, paym
     balance: round2(inv.total.minus(inv.amountAllocated)).toString(),
     reversed: payment.reversedAt !== null,
   };
+}
+
+export interface MyReceiptRow {
+  paymentId: string;
+  invoiceId: string;
+  receiptNo: string;
+  amount: string;
+  date: string;
+}
+
+/** The signed-in customer's payment receipts (not reversed), newest first. */
+export async function myPaymentReceipts(db: PrismaClient, actor: AuthzUser): Promise<MyReceiptRow[]> {
+  if (!isCustomerPrincipal(actor)) throw new AuthorizationError("Customers only");
+  const payments = await db.payment.findMany({
+    where: { customerId: actor.customerId ?? "__none__", reversedAt: null, receipt: { isNot: null } },
+    include: { receipt: true, allocations: { select: { invoiceId: true }, take: 1 } },
+    orderBy: { receivedAt: "desc" },
+  });
+  return payments
+    .filter((p) => p.receipt && p.allocations[0])
+    .map((p) => ({ paymentId: p.id, invoiceId: p.allocations[0]!.invoiceId, receiptNo: p.receipt!.number, amount: s(p.amount), date: p.receivedAt.toISOString() }));
 }

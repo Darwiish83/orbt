@@ -20,7 +20,6 @@ const PROTECTED_PREFIXES = [
   "/notifications",
   "/settings",
   "/account",
-  "/mfa",
   "/print",
   "/accounting",
 ];

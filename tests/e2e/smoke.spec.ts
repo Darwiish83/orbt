@@ -1,4 +1,3 @@
-import { authenticator } from "otplib";
 import { expect, test, type Page } from "@playwright/test";
 import {
   E2E_CUSTOMER_EMAIL,
@@ -6,29 +5,14 @@ import {
   E2E_CUSTOMER_REF,
   E2E_EMAIL,
   E2E_EMPLOYEE_ID,
-  E2E_MFA_SECRET,
   E2E_PASSWORD,
 } from "./constants";
-
-// Each authenticator code works once (replay protection), so a second staff
-// login inside the same 30-second window waits for the next code.
-let lastTotpStep = -1;
-async function freshTotp(): Promise<string> {
-  let step = Math.floor(Date.now() / 30_000);
-  if (step === lastTotpStep) {
-    await new Promise((r) => setTimeout(r, (step + 1) * 30_000 - Date.now() + 500));
-    step = Math.floor(Date.now() / 30_000);
-  }
-  lastTotpStep = step;
-  return authenticator.generate(E2E_MFA_SECRET);
-}
 
 async function staffLogin(page: Page) {
   await page.goto("/login");
   await page.getByLabel("Employee ID or Customer Reference").fill(E2E_EMPLOYEE_ID);
   await page.getByLabel("Gmail").fill(E2E_EMAIL);
   await page.getByLabel("Password").fill(E2E_PASSWORD);
-  await page.getByLabel("Authenticator code").fill(await freshTotp());
   await page.getByRole("button", { name: /log in/i }).click();
   // Generous timeout: a dev server compiles /dashboard on first hit.
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
@@ -38,6 +22,16 @@ test("landing page shows the brand hero", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/our priority/i);
   await expect(page.getByRole("link", { name: /customer & admin login/i })).toBeVisible();
+  await expect(page.getByTestId("developer-credit")).toContainText("Designed & developed by Darwiish.dev");
+});
+
+test("the sign-in page carries the copyright and developer credit", async ({ page }) => {
+  await page.goto("/login");
+  const credit = page.getByTestId("developer-credit");
+  await expect(credit).toContainText(/© \d{4} Orbit Cargo & Logistics\. All rights reserved\./);
+  await expect(credit).toContainText("Darwiish.dev");
+  await page.getByRole("button", { name: "SO" }).click();
+  await expect(credit).toContainText("Waxaa naqshadeeyay oo dhisay Darwiish.dev");
 });
 
 test("unauthenticated access to staff areas and the portal goes to the one sign-in page", async ({ page }) => {
@@ -128,6 +122,7 @@ test.describe("authenticated session", () => {
     await staffLogin(page);
     await expect(page.getByText("ADMIN PANEL")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText(E2E_EMAIL)).toBeVisible();
+    await expect(page.locator("aside").getByTestId("developer-credit")).toContainText("Darwiish.dev");
 
     // Language toggle (Somali) still works inside the authenticated shell.
     await page.getByRole("button", { name: "SO" }).click();
@@ -173,6 +168,7 @@ test.describe("customer portal", () => {
     // Customers are routed to the portal, never the admin area.
     await expect(page).toHaveURL(/\/account/, { timeout: 30_000 });
     await expect(page.getByRole("heading", { name: /your shipments/i })).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator("footer").getByTestId("developer-credit")).toContainText("Darwiish.dev");
 
     await page.goto("/account/documents");
     await page.locator('input[type="file"]').setInputFiles({
@@ -187,5 +183,23 @@ test.describe("customer portal", () => {
     await expect(download).toBeVisible();
     // The download link streams through the authorized route (private storage).
     await expect(download).toHaveAttribute("href", /\/api\/documents\/.+\/download/);
+
+    // Invoices: the customer opens their own invoice and receipt to print / save as PDF.
+    await page.goto("/account/invoices");
+    const invoice = page.getByTestId("my-invoice").first();
+    await expect(invoice).toContainText(/INV-2026-\d+/);
+    const number = (await invoice.locator("span").first().textContent())!.trim();
+    const [paper] = await Promise.all([page.waitForEvent("popup"), invoice.getByTestId("invoice-pdf").click()]);
+    await expect(paper.getByText(number).first()).toBeVisible({ timeout: 30_000 });
+    await expect(paper.getByRole("button", { name: /download pdf/i })).toBeVisible();
+    await paper.close();
+    const [receipt] = await Promise.all([page.waitForEvent("popup"), invoice.getByTestId("receipt-pdf").first().click()]);
+    await expect(receipt.getByText(/RCP-2026-\d+/).first()).toBeVisible({ timeout: 30_000 });
+    await expect(receipt.getByRole("button", { name: /download pdf/i })).toBeVisible();
+    await receipt.close();
+
+    // Someone else's (or a made-up) invoice id is simply not found.
+    const res = await page.goto("/account/invoices/not-a-real-invoice-id");
+    expect(res?.status()).toBe(404);
   });
 });

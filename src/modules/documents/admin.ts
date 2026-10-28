@@ -1,7 +1,7 @@
 import type { DocumentKind, Prisma, PrismaClient, ShipmentDocPart } from "@prisma/client";
-import { ValidationError } from "@/lib/errors";
+import { AuthorizationError, ValidationError } from "@/lib/errors";
 import { displayShipmentCode } from "@/modules/authz/adminScope";
-import { requirePermission, requireScope, type AuthzUser } from "@/modules/authz/core";
+import { allowedCountries, requirePermission, requireScope, type AuthzUser } from "@/modules/authz/core";
 import { uploadDocument } from "./service";
 
 /**
@@ -98,7 +98,13 @@ export async function uploadAdminDocument(db: PrismaClient, actor: AuthzUser, in
   requirePermission(actor, "documents:write");
   if (input.target === "customer") {
     if (!input.customerId) throw new ValidationError("Choose the customer");
-    if (!(await db.customer.findUnique({ where: { id: input.customerId } }))) throw new ValidationError("Customer not found");
+    const customer = await db.customer.findUnique({ where: { id: input.customerId } });
+    if (!customer) throw new ValidationError("Customer not found");
+    // Same country scope as the Customers list: staff file papers only for their countries' customers.
+    const countries = allowedCountries(actor);
+    if (countries !== null && customer.country !== null && !countries.includes(customer.country)) {
+      throw new AuthorizationError("Customer outside your scope");
+    }
   } else {
     if (!input.shipmentId) throw new ValidationError("Choose the shipment");
     const sh = await db.shipment.findUnique({ where: { id: input.shipmentId } });

@@ -20,9 +20,11 @@ jobs:
           --health-cmd "pg_isready -U orbit_app -d orbitcargo_test"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      DATABASE_URL: postgresql://orbit_app:orbit_ci_pw@localhost:5433/orbitcargo_test?schema=public
+      # Server admin, used only to create the least-privilege roles (ADR-029).
+      # Migrations then run as orbit_owner and the tests as orbit_runtime /
+      # orbit_portal, with random per-run passwords written to .env and .env.test.
+      ADMIN_DATABASE_URL: postgresql://orbit_app:orbit_ci_pw@localhost:5433/orbitcargo_test?schema=public
       AUTH_SECRET: ci-only-secret-value-change-me-32chars
-      DOCUMENTS_DIR: storage/ci-documents
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,12 +36,15 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
-      - name: Apply migrations (test DB)
-        run: npx prisma migrate deploy
-      - name: Integration tests
+      - name: Database roles (owner / runtime / portal)
         run: |
-          printf 'DATABASE_URL="%s"\n' "$DATABASE_URL" > .env.test
-          npm run test:integration
+          printf 'DATABASE_URL="%s"\n' "$ADMIN_DATABASE_URL" > .env
+          printf 'DATABASE_URL="%s"\nNODE_ENV="test"\nAUTH_SECRET="%s"\n' "$ADMIN_DATABASE_URL" "$AUTH_SECRET" > .env.test
+          npx tsx scripts/db-setup-roles.ts
+      - name: Apply migrations (test DB, as orbit_owner)
+        run: npx prisma migrate deploy
+      - name: Integration tests (as orbit_runtime / orbit_portal)
+        run: npm run test:integration
       - run: npm run build
       - name: Dependency audit (high severity)
         run: npm audit --audit-level=high
@@ -59,9 +64,8 @@ jobs:
           --health-cmd "pg_isready -U orbit_app -d orbitcargo"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      DATABASE_URL: postgresql://orbit_app:orbit_ci_pw@localhost:5433/orbitcargo?schema=public
+      ADMIN_DATABASE_URL: postgresql://orbit_app:orbit_ci_pw@localhost:5433/orbitcargo?schema=public
       AUTH_SECRET: ci-only-secret-value-change-me-32chars
-      DOCUMENTS_DIR: storage/ci-documents
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -70,25 +74,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
-      - run: |
-          printf 'DATABASE_URL="%s"\n' "$DATABASE_URL" > .env
-          printf 'AUTH_SECRET="%s"\n' "$AUTH_SECRET" >> .env
-          printf 'DOCUMENTS_DIR="%s"\n' "$DOCUMENTS_DIR" >> .env
-      - run: npx prisma migrate deploy
-      - run: npx prisma db seed
       # E2E secrets are random for every run and never stored: the CI database
       # is thrown away afterwards, so nothing needs to live in GitHub Secrets.
-      - name: Per-run random E2E secrets
+      # The database roles get random passwords too (scripts/db-setup-roles.ts);
+      # global-setup migrates as orbit_owner and the app runs as orbit_runtime.
+      - name: Per-run random secrets and database roles
         run: |
           P1=$(openssl rand -base64 24); P2=$(openssl rand -base64 24)
-          MFA=$(node -e 'console.log(require("otplib").authenticator.generateSecret())')
-          echo "::add-mask::$P1"; echo "::add-mask::$P2"; echo "::add-mask::$MFA"
-          {
-            echo "E2E_DATABASE_URL=$DATABASE_URL"
-            echo "E2E_PASSWORD=$P1"
-            echo "E2E_CUSTOMER_PASSWORD=$P2"
-            echo "E2E_MFA_SECRET=$MFA"
-          } >> "$GITHUB_ENV"
+          echo "::add-mask::$P1"; echo "::add-mask::$P2"
+          printf 'DATABASE_URL="%s"\nAUTH_SECRET="%s"\n' "$ADMIN_DATABASE_URL" "$AUTH_SECRET" > .env
+          printf 'E2E_DATABASE_URL="%s"\nE2E_PASSWORD="%s"\nE2E_CUSTOMER_PASSWORD="%s"\n' "$ADMIN_DATABASE_URL" "$P1" "$P2" > .env.test
+          npx tsx scripts/db-setup-roles.ts
       - run: npx playwright install --with-deps chromium
       # Smoke suite only; visual-regression baselines are platform-specific and
       # are run locally (see tests/e2e/visual.spec.ts).

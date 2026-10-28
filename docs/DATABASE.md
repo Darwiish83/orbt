@@ -27,10 +27,27 @@ Create the test DB once:
 docker exec orbitcargo-postgres createdb -U orbit_app orbitcargo_test
 ```
 
-> These are **local dev credentials for a disposable container** — not
-> production secrets. Production uses a least-privilege role and managed
-> secrets (Phase 9). Real `.env*` files are git-ignored; only `.env.example`
-> is committed.
+> `orbit_app` is the container's **admin** (superuser). Since ADR-029 the app
+> never uses it: it only creates the roles below and takes backups. Real
+> `.env*` files are git-ignored; only the `.example` templates are committed.
+
+### Database roles (ADR-029) — run once per machine, before migrating
+
+```bash
+npx tsx scripts/db-setup-roles.ts
+```
+
+It reads the admin URL from `.env` (`DATABASE_ADMIN_URL`, or `DATABASE_URL` on
+the first run), creates three roles with random passwords (never printed) and
+writes their URLs into `.env` / `.env.test`:
+
+| Role | Env key | Used for |
+|---|---|---|
+| `orbit_owner` | `MIGRATION_DATABASE_URL` | owns every object; **migrations only** (Prisma `directUrl`) |
+| `orbit_runtime` | `DATABASE_URL` | the app: rows only, guarded by triggers |
+| `orbit_portal` | `PORTAL_DATABASE_URL` | customer pages, Row-Level Security per customer |
+
+`--rotate` issues new passwords (restart the app afterwards).
 
 Manage the container: `docker stop orbitcargo-postgres` / `docker start …` /
 `docker rm -f orbitcargo-postgres` (with `docker volume rm orbitcargo_pgdata`
@@ -40,23 +57,33 @@ to wipe data).
 
 | Task | Command |
 |---|---|
-| Apply dev migrations | `npm run db:migrate` |
-| Apply migrations (prod-style) | `npm run db:deploy` |
+| Apply migrations (runs as `orbit_owner`) | `npm run db:deploy` |
+| Back up (admin) | `docker exec orbitcargo-postgres pg_dump -U orbit_app -d orbitcargo -Fc --no-owner > backups/<name>.dump` |
+| Restore into a fresh DB / compare | `scripts/restore-db.sh`, `scripts/db-fingerprint.sql` (see `docs/deployment/DEPLOYMENT.md`) |
 | Regenerate client | `npm run db:generate` |
 | Seed reference data (roles/permissions) | `npm run db:seed` |
 | Open Prisma Studio | `npm run db:studio` |
 | Migration status | `npx prisma migrate status` |
 | Integration tests (test DB) | `npm run test:integration` |
 
-Apply migrations to the **test** DB:
-```bash
-DATABASE_URL="postgresql://orbit_app:orbit_dev_pw@localhost:5433/orbitcargo_test?schema=public" npx prisma migrate deploy
-```
+Apply migrations to the **test** DB: run `npx prisma migrate deploy` with
+`DATABASE_URL` and `MIGRATION_DATABASE_URL` taken from `.env.test`.
+
+New migrations are written with `prisma migrate diff … --script` (see
+`CLAUDE.md`), not `prisma migrate dev`: the owner role can't create the shadow
+database that `migrate dev` needs. Every new table needs its grants (and RLS if
+customer-facing) in the same migration.
 
 ## Conventions
 
 - Money/weights are **decimal** columns (`@db.Decimal`), never float (ADR-004).
 - CHECK constraints that Prisma can't express are appended to the migration SQL.
 - Financial/audit rows use `onDelete: Restrict` — no destructive cascades.
+- Documents and announcement images are stored in the database (`StoredFile`,
+  ADR-030), so `pg_dump` backs up everything. Old folder files are copied with
+  `npx tsx --env-file=.env scripts/move-files-to-db.ts` (check) / `--apply`.
+- The database guards history itself (ADR-029): append-only / no-delete /
+  reversal-only triggers, the shipment status path and closed periods.
+  `tests/integration/db-guards.test.ts` proves each one with raw SQL.
 - The seed inserts **reference data only** (roles + permissions). Never seed
   production with fake customers, shipments, or payments.

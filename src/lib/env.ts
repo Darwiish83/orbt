@@ -14,13 +14,17 @@ const serverSchema = z
       .string()
       .url()
       .refine((u) => u.startsWith("postgres"), { message: "DATABASE_URL must be a PostgreSQL connection string" }),
+    // Customer pages' connection (orbit_portal, Row-Level Security; ADR-029).
+    PORTAL_DATABASE_URL: z.string().optional(),
     AUTH_SECRET: z.string().min(16).optional(),
-    DOCUMENTS_DIR: z.string().optional(),
   })
   .superRefine((val, ctx) => {
     if (val.NODE_ENV === "production") {
       if (!val.AUTH_SECRET || val.AUTH_SECRET.length < 32) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["AUTH_SECRET"], message: "AUTH_SECRET (>= 32 chars) is required in production" });
+      }
+      if (!val.PORTAL_DATABASE_URL?.startsWith("postgres")) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["PORTAL_DATABASE_URL"], message: "PORTAL_DATABASE_URL (orbit_portal) is required in production" });
       }
       if (!val.APP_URL.startsWith("https://")) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["APP_URL"], message: "APP_URL must be HTTPS in production" });

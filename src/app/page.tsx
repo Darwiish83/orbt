@@ -1,3 +1,4 @@
+import { DeveloperCredit } from "@/components/DeveloperCredit";
 import { HeroCopy } from "./HeroCopy";
 
 /**
@@ -18,6 +19,9 @@ export default function HomePage() {
           <HeroCopy />
         </div>
       </section>
+      <footer style={{ padding: "20px 32px 24px", borderTop: "1px solid var(--border-default)" }}>
+        <DeveloperCredit />
+      </footer>
     </div>
   );
 }

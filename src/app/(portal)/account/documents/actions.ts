@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/db/client";
+import { withUserDb } from "@/db/scoped";
 import { AuthorizationError, ValidationError } from "@/lib/errors";
 import { requireUser } from "@/modules/authz/session";
 import { uploadDocument } from "@/modules/documents/service";
@@ -15,12 +15,12 @@ export async function uploadDocumentAction(_prev: UploadState, formData: FormDat
 
   const buffer = Buffer.from(await file.arrayBuffer());
   try {
-    await uploadDocument(prisma, user, {
+    await withUserDb(user, (db) => uploadDocument(db, user, {
       buffer,
       filename: file.name,
       declaredType: file.type,
       kind: "OTHER",
-    });
+    }));
   } catch (e) {
     if (e instanceof ValidationError) return { error: e.message };
     if (e instanceof AuthorizationError) return { error: "You cannot upload documents here." };

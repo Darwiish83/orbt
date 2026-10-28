@@ -22,12 +22,11 @@ function appVersion(): string {
 export default async function SettingsPage() {
   const user = await requireUser();
   if (!can(user, "settings:read")) throw new AuthorizationError("Missing permission: settings:read");
-  const [settings, years, countries, scope, me] = await Promise.all([
+  const [settings, years, countries, scope] = await Promise.all([
     getSettings(prisma),
     listYears(prisma),
     listCountries(prisma),
     getAdminScope(user).catch(() => null),
-    prisma.user.findUnique({ where: { id: user.id }, select: { mfaEnabled: true } }),
   ]);
   return (
     <SettingsView
@@ -36,7 +35,6 @@ export default async function SettingsPage() {
       countries={countries}
       options={SETTING_OPTIONS}
       selectedYear={scope?.year ?? null}
-      mfaEnabled={!!me?.mfaEnabled}
       canWrite={can(user, "settings:write")}
       system={{ version: appVersion(), environment: process.env.NODE_ENV ?? "development", roles: await prisma.role.count(), permissions: await prisma.permission.count() }}
     />

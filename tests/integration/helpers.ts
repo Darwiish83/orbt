@@ -1,7 +1,14 @@
 import { PrismaClient } from "@prisma/client";
 import { seedReferenceData } from "@/modules/reference/data";
 
+/** The app's own connection (orbit_runtime, DATABASE_URL): tests act with the
+ * same privileges as production code, so the database guards apply to them. */
 export const prisma = new PrismaClient();
+
+/** Owner connection (MIGRATION_DATABASE_URL), only for emptying tables between
+ * tests: it may switch the protective triggers off for its own transaction. */
+const ownerUrl = process.env.MIGRATION_DATABASE_URL;
+export const ownerDb = ownerUrl ? new PrismaClient({ datasources: { db: { url: ownerUrl } } }) : prisma;
 
 let deleteSql: string | null = null;
 
@@ -11,10 +18,10 @@ let deleteSql: string | null = null;
  * minute per reset on some Windows machines; the tables here are tiny. */
 async function buildDeleteSql(): Promise<string> {
   const tables = (
-    await prisma.$queryRaw<{ tablename: string }[]>`
+    await ownerDb.$queryRaw<{ tablename: string }[]>`
       SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'`
   ).map((t) => t.tablename);
-  const fks = await prisma.$queryRaw<{ child: string; parent: string }[]>`
+  const fks = await ownerDb.$queryRaw<{ child: string; parent: string }[]>`
     SELECT conrelid::regclass::text AS child, confrelid::regclass::text AS parent
     FROM pg_constraint WHERE contype = 'f' AND conrelid <> confrelid`;
   const strip = (s: string) => s.replace(/^public\./, "").replace(/"/g, "");
@@ -37,7 +44,10 @@ async function buildDeleteSql(): Promise<string> {
 export async function resetDb(): Promise<void> {
   deleteSql ??= await buildDeleteSql();
   if (deleteSql) {
-    await prisma.$transaction(deleteSql.split("\n").map((sql) => prisma.$executeRawUnsafe(sql)));
+    await ownerDb.$transaction([
+      ownerDb.$executeRawUnsafe(`SET LOCAL session_replication_role = replica`),
+      ...deleteSql.split("\n").map((sql) => ownerDb.$executeRawUnsafe(sql)),
+    ]);
   }
   await seedReferenceData(prisma);
 }
@@ -45,8 +55,10 @@ export async function resetDb(): Promise<void> {
 /** Guard: integration tests must never run against a non-test database. */
 export function assertTestDatabase(): void {
   const url = process.env.DATABASE_URL ?? "";
-  if (!/orbitcargo_test/.test(url)) {
-    throw new Error(`Refusing to run integration tests: DATABASE_URL is not the test DB (${url})`);
+  if (!/orbitcargo_test/.test(url) || (process.env.MIGRATION_DATABASE_URL && !/orbitcargo_test/.test(process.env.MIGRATION_DATABASE_URL))) {
+    // Name the database only: the URL holds a password.
+    const name = (() => { try { return new URL(url).pathname; } catch { return "?"; } })();
+    throw new Error(`Refusing to run integration tests: DATABASE_URL is not the test DB (${name})`);
   }
 }
 

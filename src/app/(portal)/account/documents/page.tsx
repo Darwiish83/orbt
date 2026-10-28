@@ -1,4 +1,4 @@
-import { prisma } from "@/db/client";
+import { withUserDb } from "@/db/scoped";
 import { listDocuments } from "@/modules/documents/service";
 import { myTransferReceipts } from "@/modules/transfer/receipts";
 import { money } from "@/ui/format";
@@ -16,7 +16,7 @@ function sizeLabel(bytes: number): string {
 
 export default async function AccountDocumentsPage() {
   const user = await requireUser();
-  const [{ items }, transfers] = await Promise.all([listDocuments(prisma, user, { pageSize: 50 }), myTransferReceipts(prisma, user)]);
+  const [{ items }, transfers] = await withUserDb(user, async (db) => [await listDocuments(db, user, { pageSize: 50 }), await myTransferReceipts(db, user)] as const);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>

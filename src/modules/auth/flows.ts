@@ -7,7 +7,8 @@ import { PHONE_REQUIRED, PHONE_TAKEN } from "@/modules/customers/phone";
 import { assertUniqueContact, requireSomaliPhone, somaliPhoneKey } from "@/modules/customers/service";
 import { assertNotRateLimited, recordAttempt } from "./rateLimit";
 import { issueOtp, verifyOtp, type OtpSender } from "./otp";
-import { consumeResetToken, createSetPasswordToken } from "./reset";
+import { assertStrongPassword } from "./passwordPolicy";
+import { consumeResetToken, createSetPasswordToken, peekResetToken } from "./reset";
 
 /**
  * Sign-in onboarding flows (ADR-016), all server-side:
@@ -223,13 +224,20 @@ export async function completeSetPassword(
   db: PrismaClient,
   input: { token: string; password: string; confirm: string },
 ): Promise<{ userId: string; email: string; customerRef: string | null; employeeId: string | null }> {
-  if (input.password.length < 8) throw new ValidationError("Password must be at least 8 characters");
-  if (input.password !== input.confirm) throw new ValidationError("Passwords do not match");
+  const EXPIRED = "This step has expired. Please start again.";
+  // Check the rules against this person's email/ID before the token is spent.
+  const owner = await peekResetToken(db, input.token);
+  if (!owner) throw new ValidationError(EXPIRED);
+  const who = await db.user.findUniqueOrThrow({
+    where: { id: owner },
+    select: { email: true, customer: { select: { ref: true } }, employee: { select: { code: true } } },
+  });
+  assertStrongPassword(input.password, input.confirm, { email: who.email, id: who.customer?.ref ?? who.employee?.code });
   let userId: string;
   try {
     userId = await consumeResetToken(db, input.token, input.password);
   } catch {
-    throw new ValidationError("This step has expired. Please start again.");
+    throw new ValidationError(EXPIRED);
   }
   const u = await db.user.findUniqueOrThrow({
     where: { id: userId },

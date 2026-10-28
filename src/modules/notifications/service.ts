@@ -56,16 +56,20 @@ export async function listNotificationsForUser(
   filters: PageParams = {},
 ): Promise<Page<Notification>> {
   const { page, pageSize, skip, take } = normalizePage(filters);
-  await publishDueAnnouncements(db);
   let where: Prisma.NotificationWhereInput;
 
   if (isCustomerPrincipal(actor)) {
+    // The customer connection can't write (ADR-029), so a scheduled
+    // announcement that is due counts as sent here; staff pages publish it.
     where = {
-      status: "SENT",
-      OR: [{ audience: "ALL" }, { audience: "CUSTOMER", customerId: actor.customerId ?? "__none__" }],
+      AND: [
+        { OR: [{ status: "SENT" }, { status: "SCHEDULED", scheduledAt: { lte: new Date() } }] },
+        { OR: [{ audience: "ALL" }, { audience: "CUSTOMER", customerId: actor.customerId ?? "__none__" }] },
+      ],
     };
   } else {
     requirePermission(actor, "notifications:read");
+    await publishDueAnnouncements(db);
     where = {};
   }
 

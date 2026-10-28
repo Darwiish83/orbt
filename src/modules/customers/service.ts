@@ -1,5 +1,5 @@
 import { Prisma, type Customer, type PrismaClient } from "@prisma/client";
-import { ValidationError } from "@/lib/errors";
+import { AuthorizationError, ValidationError } from "@/lib/errors";
 import { parseSomaliPhone, PHONE_REQUIRED, PHONE_TAKEN } from "./phone";
 import { buildPage, normalizePage, type Page, type PageParams } from "@/lib/pagination";
 import { logAudit } from "@/modules/audit/log";
@@ -59,12 +59,34 @@ function isUniqueViolation(e: unknown, field: string): boolean {
   );
 }
 
+/** Staff country scope for customers: their countries plus unassigned customers. */
+export function customerScopeWhere(actor: AuthzUser): Prisma.CustomerWhereInput {
+  const countries = allowedCountries(actor);
+  return countries === null ? {} : { OR: [{ country: { in: countries } }, { country: null }] };
+}
+
+/** A staff member may only touch customers inside their country scope, and may
+ * only give a customer one of their own countries. */
+async function assertCustomerInScope(db: PrismaClient, actor: AuthzUser, id: string, newCountry?: string | null) {
+  if (isCustomerPrincipal(actor)) return;
+  if (!(await db.customer.findFirst({ where: { id, ...customerScopeWhere(actor) }, select: { id: true } }))) {
+    throw new ValidationError("Customer not found");
+  }
+  assertCountryAllowed(actor, newCountry);
+}
+
+function assertCountryAllowed(actor: AuthzUser, country: string | null | undefined) {
+  const countries = allowedCountries(actor);
+  if (country && countries !== null && !countries.includes(country)) throw new AuthorizationError("Country outside your scope");
+}
+
 export async function createCustomer(
   db: PrismaClient,
   actor: AuthzUser,
   input: CreateCustomerInput,
 ): Promise<Customer> {
   requirePermission(actor, "customers:write");
+  assertCountryAllowed(actor, input.country);
   const name = input.name?.trim();
   const company = input.company?.trim();
   if (!name) throw new ValidationError("Full name is required");
@@ -114,7 +136,8 @@ export async function getCustomer(
   id: string,
 ): Promise<Customer | null> {
   assertCustomerAccess(actor, id, "customers:read");
-  return db.customer.findUnique({ where: { id } });
+  if (isCustomerPrincipal(actor)) return db.customer.findUnique({ where: { id } });
+  return db.customer.findFirst({ where: { id, ...customerScopeWhere(actor) } });
 }
 
 export interface ListCustomersFilters extends PageParams {
@@ -173,6 +196,7 @@ export async function updateCustomer(
   data: Partial<CreateCustomerInput>,
 ): Promise<Customer> {
   assertCustomerAccess(actor, id, "customers:write");
+  await assertCustomerInScope(db, actor, id, data.country);
   if (data.company !== undefined && !data.company.trim()) throw new ValidationError("Company is required");
   const email = data.email === undefined ? undefined : data.email.trim().toLowerCase() || null;
   // A phone sent with an edit must be valid; it can't be cleared (mandatory).

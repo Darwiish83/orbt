@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition, type ReactNode } from "react";
 import { useT } from "@/i18n/I18nProvider";
@@ -18,7 +17,6 @@ type Props = {
   countries: Awaited<ReturnType<typeof listCountries>>;
   options: { currencies: string[]; timezones: string[] };
   selectedYear: number | null;
-  mfaEnabled: boolean;
   canWrite: boolean;
   system: { version: string; environment: string; roles: number; permissions: number };
 };
@@ -42,7 +40,7 @@ export function SettingsView(props: Props) {
   );
 }
 
-function Inner({ settings, years, countries, options, selectedYear, mfaEnabled, canWrite, system }: Props) {
+function Inner({ settings, years, countries, options, selectedYear, canWrite, system }: Props) {
   const t = useT();
   const toast = useToast();
   const router = useRouter();
@@ -272,17 +270,6 @@ function Inner({ settings, years, countries, options, selectedYear, mfaEnabled, 
             )}
             {sec === "security" && (
               <>
-                <Row label="Two Factor Authentication" desc="Authenticator code at every login">
-                  {mfaEnabled ? (
-                    <Badge tone="success">{t("On")}</Badge>
-                  ) : (
-                    <Link href="/mfa/setup">
-                      <Button size="s" variant="outline">
-                        {t("Turn on")}
-                      </Button>
-                    </Link>
-                  )}
-                </Row>
                 <div style={{ font: "600 14px var(--font-body)", color: "var(--text-strong)", margin: "18px 0 12px" }}>{t("Change password")}</div>
                 <div style={grid}>
                   <Input type="password" autoComplete="current-password" label={t("Current Password")} value={pw.current} onChange={(e) => setPw((o) => ({ ...o, current: e.target.value }))} />
