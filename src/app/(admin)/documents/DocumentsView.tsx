@@ -279,7 +279,6 @@ function UploadDialog({
   const [file, setFile] = useState<File | null>(null);
   const [reference, setReference] = useState("");
   const [filename, setFilename] = useState("");
-  const [kind, setKind] = useState(target === "shipment" ? "CARGO_DOC" : "CARGO_DOC");
   const [shipmentId, setShipmentId] = useState("");
   const [part, setPart] = useState("");
   const mode = shipments.find((s) => s.id === shipmentId)?.mode;
@@ -304,7 +303,6 @@ function UploadDialog({
       if (shipmentId) fd.set("shipmentId", shipmentId);
       fd.set("reference", reference);
       fd.set("filename", filename);
-      fd.set("kind", kind);
       if (target === "shipment") fd.set("part", part);
       fd.set("file", file);
       const r = await uploadDocumentAction(fd);
@@ -484,25 +482,6 @@ function UploadDialog({
               })}
             </div>
           </div>
-        )}
-        {target === "customer" && (
-          <label
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-              font: "600 13px var(--font-body)",
-            }}
-          >
-            {t("Type")}
-            <select value={kind} onChange={(e) => setKind(e.target.value)} style={sel}>
-              {KINDS.map(([k, l]) => (
-                <option key={k} value={k}>
-                  {t(l)}
-                </option>
-              ))}
-            </select>
-          </label>
         )}
         <input
           type="file"

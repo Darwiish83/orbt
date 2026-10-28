@@ -6,6 +6,7 @@ export { DataTable } from "./DataTable";
 export type { DataColumn, DataTableProps } from "./DataTable";
 export { ReceiptPaper, ReceiptSheet } from "./Receipt";
 export { Signature, Stamp, StampAndSign } from "./Stamp";
+export { PaymentPaper } from "./PaymentPaper";
 export { TransferReceiptPaper } from "./TransferReceiptPaper";
 export type { TransferReceiptPaperData } from "./TransferReceiptPaper";
 export { InvoicePaper } from "./InvoicePaper";

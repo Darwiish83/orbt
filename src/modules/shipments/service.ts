@@ -12,6 +12,8 @@ import {
 } from "@/modules/authz/core";
 import { DESTINATION, requireBusinessYear, requireOriginCountry } from "@/modules/reference/data";
 import { lineMeasure } from "@/modules/finance/charges";
+import { normalizeMixParts } from "./mix";
+import { assertPricing } from "./pricing";
 import { generateTrackingNumber, nextShipmentCode } from "./identifiers";
 import { canTransition, publicStatusLabel } from "./stateMachine";
 
@@ -190,8 +192,9 @@ export async function changeShipmentStatus(
     // Spec §8: one change updates every customer in the shipment and tells them.
     let notified = 0;
     if (opts.notifyCustomers) {
-      const customers = await tx.shipmentLine.findMany({ where: { shipmentId }, distinct: ["customerId"], select: { customerId: true } });
-      const code = shipment.code.split("@")[0];
+      // Only customers whose cargo is priced know about the shipment yet (ADR-036).
+      const customers = await tx.shipmentLine.findMany({ where: { shipmentId, rate: { not: null } }, distinct: ["customerId"], select: { customerId: true } });
+      const code = shipment.publicCode; // customers know it by its SH- code (ADR-034)
       await tx.notification.createMany({
         data: customers.map((c) => ({
           audience: "CUSTOMER" as const,
@@ -249,6 +252,8 @@ export interface ShipmentLineInput {
   volumeCbm?: Amount;
   mixCount?: number;
   mixKg?: Amount;
+  /** Numbered MIX boxes (Air). When given, mixCount and mixKg are derived from them. */
+  mixParts?: { box: number; kg: Amount }[];
   rate?: Amount;
   qualityRate?: Amount;
   brandPcs?: number;
@@ -260,6 +265,13 @@ export interface ShipmentLineInput {
   note?: string;
 }
 
+/** Derives the line's MIX count and KG from its numbered boxes, when given. */
+export function withMix<T extends Partial<ShipmentLineInput>>(input: T): T {
+  if (!input.mixParts) return input;
+  const m = normalizeMixParts(input.mixParts.map((p) => ({ box: p.box, kg: String(p.kg) })));
+  return { ...input, mixParts: m.parts, mixCount: m.mixCount || undefined, mixKg: m.mixKg?.toString() };
+}
+
 /**
  * Add a customer's cargo to a shipment. A customer may be added several times
  * (entries stack and are summed). Measure (KG + MIX KG for Air, CBM for Sea)
@@ -268,14 +280,17 @@ export interface ShipmentLineInput {
  */
 export async function addShipmentLine(db: PrismaClient, actor: AuthzUser, shipmentId: string, input: ShipmentLineInput) {
   requirePermission(actor, "shipments:write");
+  // The data team adds the cargo; the rates are pricing staff's (ADR-036).
+  assertPricing(actor, input);
   const shipment = await db.shipment.findUnique({ where: { id: shipmentId } });
   if (!shipment) throw new ValidationError("Shipment not found");
   requireScope(actor, { country: shipment.originCountry, businessYear: shipment.businessYear });
   await assertYearOpen(db, shipment.originCountry, shipment.businessYear);
   if (shipment.mode === "AIR" && input.volumeCbm != null) throw new ValidationError("Air lines are measured in KG");
-  if (shipment.mode === "SEA" && (input.chargeableWeightKg != null || input.mixKg != null)) {
+  if (shipment.mode === "SEA" && (input.chargeableWeightKg != null || input.mixKg != null || input.mixParts?.length)) {
     throw new ValidationError("Sea lines are measured in CBM");
   }
+  input = withMix(input);
   for (const [k, v] of Object.entries({ packages: input.packages, mixCount: input.mixCount, brandPcs: input.brandPcs })) {
     if (v != null && (!Number.isInteger(v) || v < 0)) throw new ValidationError(`${k} must be a whole number ≥ 0`);
   }
@@ -294,6 +309,7 @@ export async function addShipmentLine(db: PrismaClient, actor: AuthzUser, shipme
       volumeCbm: input.volumeCbm,
       mixCount: input.mixCount,
       mixKg: input.mixKg,
+      mixParts: input.mixParts ? (input.mixParts as Prisma.InputJsonValue) : undefined,
       rate: input.rate,
       qualityRate: input.qualityRate,
       brandPcs: input.brandPcs,

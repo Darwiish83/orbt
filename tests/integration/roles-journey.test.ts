@@ -9,6 +9,7 @@ import { listInvoices } from "@/modules/finance/invoices";
 import { addShipmentPayment, createShipmentInvoice, deleteShipmentPayment, getInvoiceDocument, getPaymentReceipt, myPaymentReceipts } from "@/modules/finance/shipmentFinance";
 import { listNotificationsForUser } from "@/modules/notifications/service";
 import { addShipmentLine, changeShipmentStatus, createShipment, listShipments } from "@/modules/shipments/service";
+import { setShipmentLinePricing } from "@/modules/shipments/manage";
 import { assertTestDatabase, prisma, resetDb, testPhone } from "./helpers";
 
 /**
@@ -67,6 +68,7 @@ describe("a shipment's life, each role doing its own part", () => {
     const ops = await staff(["shipments:read", "shipments:write", "shipments:status", "customers:read"]);
     const fin = await staff(["invoices:manage", "payments:manage", "customers:read", "shipments:read"]);
     const docs = await staff(["documents:write", "documents:read", "customers:read"]);
+    const pricer = await staff(["pricing:write", "shipments:read"]);
     const india = await staff(["shipments:read", "shipments:write", "shipments:status", "invoices:manage", "payments:manage"], "India");
     const salaam = await prisma.bank.findUniqueOrThrow({ where: { name: "Salaam Bank" } });
 
@@ -75,10 +77,13 @@ describe("a shipment's life, each role doing its own part", () => {
     const A = await customerUser(alpha.id);
     const B = await customerUser(beta.id);
 
-    // 1. Operations creates W-1 and adds Alpha's cargo.
+    // 1. Operations creates W-1 and adds Alpha's cargo; pricing staff set the rate (ADR-036).
     const w1 = await createShipment(prisma, ops, { mode: "AIR", originCountry: "Turkey", businessYear: 2026 });
-    await addShipmentLine(prisma, ops, w1.id, { customerId: alpha.id, packages: 10, chargeableWeightKg: "100", rate: "6" });
+    await expect(addShipmentLine(prisma, ops, w1.id, { customerId: alpha.id, packages: 10, chargeableWeightKg: "100", rate: "6" })).rejects.toThrow(/pricing staff/);
+    const cargo = await addShipmentLine(prisma, ops, w1.id, { customerId: alpha.id, packages: 10, chargeableWeightKg: "100" });
     expect(await prisma.shipmentLine.count({ where: { shipmentId: w1.id, customerId: alpha.id } })).toBe(1);
+    expect((await portalView(A)).shipments).toEqual([]); // not priced yet
+    await setShipmentLinePricing(prisma, pricer, cargo.id, { rate: "6" });
     expect((await portalView(A)).shipments).toEqual([{ id: w1.id, status: "AT_ORIGIN_STORE" }]);
     expect((await portalView(B)).shipments).toEqual([]);
     // Operations can't bill; another country's staff can't touch W-1.
@@ -141,14 +146,14 @@ describe("a shipment's life, each role doing its own part", () => {
     await addShipmentPayment(prisma, fin, { invoiceId: invoice.id, amount: "200", bankId: salaam.id, receivedAt: D("2026-10-07") });
 
     // 4. Documents staff files Alpha's cargo papers; only Alpha sees and downloads them.
-    const doc = await uploadAdminDocument(prisma, docs, { target: "customer", customerId: alpha.id, reference: "PL-1", kind: "CARGO_DOC", file: { buffer: PDF, name: "packing.pdf", type: "application/pdf" } });
+    const doc = await uploadAdminDocument(prisma, docs, { target: "customer", customerId: alpha.id, reference: "PL-1", file: { buffer: PDF, name: "packing.pdf", type: "application/pdf" } });
     expect(await prisma.storedFile.count({ where: { key: doc.storageKey } })).toBe(1); // bytes in the database
     expect((await portalView(A)).documents).toContain(doc.id);
     expect((await portalView(B)).documents).toEqual([]);
     expect((await withCustomerDb(alpha.id, (db) => getDocumentForDownload(db, A, doc.id)))!.buffer).toEqual(PDF);
     // Turkey's documents staff can't file papers for a customer of another country.
     const gamma = await prisma.customer.update({ where: { id: (await createCustomer(prisma, admin, { name: "Gamma", company: "Gamma Co", phone: testPhone() })).id }, data: { country: "India" } });
-    await expect(uploadAdminDocument(prisma, docs, { target: "customer", customerId: gamma.id, kind: "OTHER", file: { buffer: PDF, name: "g.pdf", type: "application/pdf" } })).rejects.toThrow(/scope/);
+    await expect(uploadAdminDocument(prisma, docs, { target: "customer", customerId: gamma.id, file: { buffer: PDF, name: "g.pdf", type: "application/pdf" } })).rejects.toThrow(/scope/);
     expect(await withCustomerDb(beta.id, (db) => getDocumentForDownload(db, B, doc.id))).toBeNull();
 
     // 5. Operations moves W-1 on; every customer in it is told, nobody else.
@@ -187,7 +192,7 @@ describe("a shipment's life, each role doing its own part", () => {
     await expect(addShipmentPayment(prisma, A, { invoiceId: invoice.id, amount: "60", bankId: salaam.id, receivedAt: D("2026-10-05") })).rejects.toThrow();
     await expect(changeShipmentStatus(prisma, A, w1.id, "DEPARTED")).rejects.toThrow();
     await expect(incomeAndOut(prisma, A, TR)).rejects.toThrow();
-    await expect(uploadAdminDocument(prisma, A, { target: "customer", customerId: alpha.id, kind: "OTHER", file: { buffer: PDF, name: "x.pdf", type: "application/pdf" } })).rejects.toThrow();
+    await expect(uploadAdminDocument(prisma, A, { target: "customer", customerId: alpha.id, file: { buffer: PDF, name: "x.pdf", type: "application/pdf" } })).rejects.toThrow();
 
     expect(await prisma.payment.count()).toBe(0);
     expect((await prisma.shipment.findUniqueOrThrow({ where: { id: w1.id } })).status).toBe("AT_ORIGIN_STORE");

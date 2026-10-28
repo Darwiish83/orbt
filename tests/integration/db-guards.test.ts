@@ -30,7 +30,7 @@ async function world() {
   const custA = await prisma.customer.create({ data: { ref: "OR-3001", name: "A", company: "A Co", phone: "+252 61 111 1111", phoneKey: "252611111111" } });
   const custB = await prisma.customer.create({ data: { ref: "OR-3002", name: "B", company: "B Co", phone: "+252 61 222 2222", phoneKey: "252612222222" } });
   const shipment = await prisma.shipment.create({ data: { code: "W-1", mode: "AIR", originCountry: "Turkey", businessYear: 2026 } });
-  await prisma.shipmentLine.create({ data: { shipmentId: shipment.id, customerId: custA.id, packages: 2, chargeableWeightKg: 10 } });
+  await prisma.shipmentLine.create({ data: { shipmentId: shipment.id, customerId: custA.id, packages: 2, chargeableWeightKg: 10, rate: 6 } }); // priced: the customer sees it (ADR-036)
   const invoice = await prisma.invoice.create({ data: { number: "INV-2026-0001", customerId: custA.id, shipmentId: shipment.id, total: 70, businessYear: 2026 } });
   const line = await prisma.chargeLineItem.create({ data: { parentType: "INVOICE", invoiceId: invoice.id, category: "FREIGHT", unitPrice: 70, amount: 70 } });
   const payment = await prisma.payment.create({ data: { customerId: custA.id, amount: 20, method: "CASH" } });

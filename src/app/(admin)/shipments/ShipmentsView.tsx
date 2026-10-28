@@ -56,7 +56,18 @@ function Inner({ scope, mode, q: q0, rows, totals, perms }: Props) {
   const open = (r: AdminShipmentRow) => router.push(`/shipments/${r.id}`);
 
   const cols: DataColumn<AdminShipmentRow>[] = [
-    { key: "c", label: "Shipment", mono: true, strong: true, render: (r) => r.code },
+    {
+      key: "c",
+      label: "Shipment",
+      mono: true,
+      strong: true,
+      render: (r) => (
+        <span>
+          {r.code}
+          <span style={{ display: "block", fontSize: 11, fontWeight: 500, color: "var(--text-muted)" }}>{r.publicCode}</span>
+        </span>
+      ),
+    },
     { key: "d", label: "Date", render: (r) => fdate(r.shipDate) },
     { key: "a", label: "Arrival", render: (r) => fdate(r.arrivalDate) },
     {

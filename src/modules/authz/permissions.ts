@@ -49,6 +49,8 @@ export const PERMISSIONS = [
   "accounting:manage",
   "costorigin:write",
   "costmgq:write",
+  // Shipment pricing (ADR-036): only this sets Rate, Quality Rate and Brand Rate.
+  "pricing:write",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

@@ -238,7 +238,7 @@ describe("Documents: a shipment's papers stay with the shipment's country", () =
     const inShip = await createShipment(prisma, admin, { mode: "AIR", originCountry: "India", businessYear: 2026 });
     const trShip = await createShipment(prisma, admin, { mode: "AIR", originCountry: "Turkey", businessYear: 2026 });
     const up = (shipmentId: string) =>
-      uploadAdminDocument(prisma, admin, { target: "shipment", shipmentId, part: "ORIGIN_AWB", kind: "CARGO_DOC", file: { buffer: pdf, name: "awb.pdf", type: "application/pdf" } });
+      uploadAdminDocument(prisma, admin, { target: "shipment", shipmentId, part: "ORIGIN_AWB", file: { buffer: pdf, name: "awb.pdf", type: "application/pdf" } });
     const inDoc = await up(inShip.id);
     const trDoc = await up(trShip.id);
     const tr = await staff(["documents:manage"], "Turkey");

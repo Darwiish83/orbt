@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient, ShipmentStatus } from "@prisma/client";
 import { AuthorizationError } from "@/lib/errors";
 import { allowedCountries, requirePermission, type AuthzUser } from "@/modules/authz/core";
 import { dec, round2 } from "@/modules/finance/money";
+import { packagesOf as shipmentPackages } from "@/modules/shipments/mix";
 
 export interface Report {
   businessYear: number | null;
@@ -123,7 +124,7 @@ export async function getAdminReport(
     ).toString();
   }
   const statuses: ShipmentStatus[] = ["AT_ORIGIN_STORE", "DEPARTED", "IN_TRANSIT", "ARRIVED"];
-  const packagesOf = (mode: "AIR" | "SEA") => shipments.filter((s) => s.mode === mode).flatMap((s) => s.lines).reduce((n, l) => n + (l.packages ?? 0) + (l.mixCount ?? 0), 0);
+  const packagesOf = (mode: "AIR" | "SEA") => shipments.filter((s) => s.mode === mode).reduce((n, s) => n + shipmentPackages(s.lines), 0);
   // One line per country (the company report covers several).
   const byCountry = [...new Set(shipments.map((s) => s.originCountry))].sort().map((c) => {
     const inv = invoices.filter((i) => i.shipment?.originCountry === c);
@@ -142,7 +143,7 @@ export async function getAdminReport(
       sea: shipments.filter((s) => s.mode === "SEA").length,
       kg: measure("AIR"),
       cbm: measure("SEA"),
-      packages: shipments.flatMap((s) => s.lines).reduce((n, l) => n + (l.packages ?? 0) + (l.mixCount ?? 0), 0),
+      packages: shipments.reduce((n, s) => n + shipmentPackages(s.lines), 0),
       packagesAir: packagesOf("AIR"),
       packagesSea: packagesOf("SEA"),
       revenue: revenue.toString(),

@@ -80,6 +80,13 @@ export async function loadAuthzUser(db: PrismaClient, userId: string): Promise<A
     }
   }
 
+  // Shipment pricing (ADR-036): the person who sets the rates also edits
+  // everything else on a shipment's customers (owner 2026-10-28).
+  if (permissions.has("pricing:write")) {
+    permissions.add("shipments:read");
+    permissions.add("shipments:write");
+  }
+
   return {
     id: user.id,
     email: user.email,

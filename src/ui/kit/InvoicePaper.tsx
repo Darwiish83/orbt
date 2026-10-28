@@ -2,9 +2,8 @@
 
 /* eslint-disable @next/next/no-img-element -- small static brand/bank images */
 import type { ReactNode } from "react";
-import { bankLogo, COMPANY } from "@/config/company";
+import { bankLogo, COMPANY, INVOICE_BANK_ACCOUNTS } from "@/config/company";
 import { useT } from "@/i18n/I18nProvider";
-import { BANKS } from "@/modules/reference/data";
 import { Icon } from "@/ui/primitives";
 import { fdate, money, num } from "@/ui/format";
 import { StatusBadge } from "./display";
@@ -164,10 +163,10 @@ export function InvoicePaper({ inv, print, company }: { inv: InvoicePaperData; p
       </div>
       <div style={{ font: "700 13px var(--font-display)", color: "var(--text-strong)" }}>{t("Bank accounts")}</div>
       <div style={{ border: "1px solid var(--border-default)", borderRadius: "var(--radius-m)", padding: "2px 12px", background: "#fff" }}>
-        {BANKS.filter((b) => !b.isCash).map((b, n, all) => (
-          <div key={b.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: n < all.length - 1 ? "1px solid var(--border-default)" : "none" }}>
-            <img src={bankLogo(b.name) ?? ""} alt={b.name} style={{ width: 32, height: 32, borderRadius: 6, objectFit: "cover", flex: "none" }} />
-            <span style={{ flex: 1, font: "600 12px var(--font-body)", color: "var(--text-strong)" }}>{b.name}</span>
+        {INVOICE_BANK_ACCOUNTS.map((b, n, all) => (
+          <div key={b.bank} data-testid="invoice-bank" style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: n < all.length - 1 ? "1px solid var(--border-default)" : "none" }}>
+            <img src={bankLogo(b.bank) ?? ""} alt={b.label} style={{ width: 32, height: 32, borderRadius: 6, objectFit: "cover", flex: "none" }} />
+            <span style={{ flex: 1, font: "600 12px var(--font-body)", color: "var(--text-strong)" }}>{b.label}</span>
             <span style={{ font: "700 13px var(--font-mono)", color: "var(--navy-700)" }}>{b.accountNumber}</span>
           </div>
         ))}

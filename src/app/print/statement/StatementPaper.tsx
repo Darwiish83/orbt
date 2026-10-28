@@ -61,7 +61,8 @@ export function StatementPaper({
               <td style={td}>
                 {r.customerName} <span style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{r.customerRef}</span>
               </td>
-              <td style={{ ...td, fontFamily: "var(--font-mono)" }}>{r.shipmentCode}</td>
+              {/* A statement for one customer is theirs to keep: it shows the SH- code (ADR-034). */}
+              <td style={{ ...td, fontFamily: "var(--font-mono)" }}>{customer ? r.shipmentPublic : r.shipmentCode}</td>
               <td style={{ ...td, fontFamily: "var(--font-mono)" }}>{r.docNo}</td>
               <td style={td}>{r.kind === "INVOICE" ? `${t("Invoice")} · ${t(r.mode === "AIR" ? "Air Freight" : "Sea Freight")}` : `${t("Payment")} · ${r.bank ? t(r.bank) : "-"} · ${r.receiptNo ?? ""}`}</td>
               <td style={{ ...td, textAlign: "end" }}>{Number(r.debit) ? money(r.debit) : "-"}</td>

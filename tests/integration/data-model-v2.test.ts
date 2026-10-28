@@ -333,7 +333,7 @@ describe("reference data", () => {
     const banks = await prisma.bank.findMany({ orderBy: { sortOrder: "asc" } });
     expect(banks.map((b) => [b.name, b.accountNumber])).toEqual([
       ["Salaam Bank", "37215407"],
-      ["Dahabshiil Bank", "365258411"],
+      ["Dahabshiil Bank", "310015695901"],
       ["Premier Bank", "25687140"],
       ["Cash", null],
     ]);

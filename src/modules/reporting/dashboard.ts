@@ -3,6 +3,7 @@ import { displayShipmentCode } from "@/modules/authz/adminScope";
 import { can, requireScope, type AuthzUser } from "@/modules/authz/core";
 import { lineMeasure } from "@/modules/finance/charges";
 import { round2, sum } from "@/modules/finance/money";
+import { packagesOf as shipmentPackages } from "@/modules/shipments/mix";
 
 /**
  * Dashboard (spec B3 / §4) for the top bar's country + year. Each block is
@@ -98,7 +99,7 @@ export async function getDashboard(db: PrismaClient, actor: AuthzUser, scope: { 
           sea: shipments.filter((x) => x.mode === "SEA").length,
           kg: s(sum(shipments.filter((x) => x.mode === "AIR").flatMap((x) => x.lines.map((l) => lineMeasure("AIR", l))))),
           cbm: s(sum(shipments.filter((x) => x.mode === "SEA").flatMap((x) => x.lines.map((l) => lineMeasure("SEA", l))))),
-          packages: shipments.reduce((n, x) => n + x.lines.reduce((m, l) => m + (l.packages ?? 0) + (l.mixCount ?? 0), 0), 0),
+          packages: shipments.reduce((n, x) => n + shipmentPackages(x.lines), 0),
           statusCounts: statuses.map((st) => ({ status: st, count: shipments.filter((x) => x.status === st).length })),
           recent: shipments.slice(0, 6).map((x) => ({
             id: x.id,
@@ -108,7 +109,7 @@ export async function getDashboard(db: PrismaClient, actor: AuthzUser, scope: { 
             originCity: x.originCity,
             destCity: x.destCity,
             arrivalDate: x.arrivalDate?.toISOString() ?? null,
-            packages: x.lines.reduce((n, l) => n + (l.packages ?? 0) + (l.mixCount ?? 0), 0),
+            packages: shipmentPackages(x.lines),
             status: x.status,
             amount: s(sum(x.invoices.map((i) => i.total))),
           })),

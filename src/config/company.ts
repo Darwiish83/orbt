@@ -10,6 +10,16 @@ export const COMPANY = {
   whatsappUrl: "https://wa.me/252614111539",
 } as const;
 
+/**
+ * Accounts printed on the invoice for the customer to pay into (owner
+ * 2026-10-26): Premier Bank is not offered on invoices, and Salaam is printed
+ * with its full name. `bank` is the bank as recorded in the system.
+ */
+export const INVOICE_BANK_ACCOUNTS = [
+  { bank: "Salaam Bank", label: "Salaam Somali Bank", accountNumber: "37215407" },
+  { bank: "Dahabshiil Bank", label: "Dahabshiil Bank", accountNumber: "310015695901" },
+] as const;
+
 /** Bank logos bundled under /banks, matched by bank name. */
 export function bankLogo(bank: string | null | undefined): string | null {
   const b = bank ?? "";

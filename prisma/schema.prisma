@@ -393,6 +393,9 @@ model Customer {
 model Shipment {
   id              String         @id @default(cuid())
   code            String         @unique
+  // What customers see (ADR-034): "SH-" + 5 random digits, never in order, so
+  // a customer can't tell which shipment came first. Staff use `code` (W-n / C-n).
+  publicCode      String         @unique @default(dbgenerated("orbit_shipment_public_code()"))
   trackingNumber  String?        @unique // generated in Phase 4
   mode            ShipmentMode
   originCountry   String
@@ -471,6 +474,9 @@ model ShipmentLine {
   // MIX: a box shared with other customers. Measure (air) = KG + MIX KG.
   mixCount           Int?
   mixKg              Decimal?  @db.Decimal(12, 3)
+  // Numbered MIX boxes this line is in: [{ box, kg }] (ADR-032). mixCount and
+  // mixKg are derived from these parts on the server.
+  mixParts           Json?
   // Charges (ADR-013). Line total is computed server-side, never stored from the browser.
   rate               Decimal?  @db.Decimal(14, 2) // per kg (air) / per CBM (sea)
   qualityRate        Decimal?  @db.Decimal(14, 2) // per measure unit

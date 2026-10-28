@@ -22,6 +22,8 @@ interface Props {
   modules: { key: string; label: string }[];
   roles: { key: string; name: string }[];
   countries: string[];
+  /** Suggested Employee ID for Add Employee (the admin may type another). */
+  nextCode: string;
   activity: Activity | null;
   me: string;
   perms: { manage: boolean; superAdmin: boolean; audit: boolean };
@@ -56,7 +58,7 @@ export function UsersView(props: Props) {
   );
 }
 
-function Inner({ tab, filters, team, matrix, modules, roles, countries, activity, me, perms }: Props) {
+function Inner({ tab, filters, team, matrix, modules, roles, countries, nextCode, activity, me, perms }: Props) {
   const t = useT();
   const toast = useToast();
   const router = useRouter();
@@ -105,6 +107,11 @@ function Inner({ tab, filters, team, matrix, modules, roles, countries, activity
               {t(x.name)}
             </Badge>
           ))}
+          {r.pricing && (
+            <span data-testid="pricing-badge">
+              <Badge tone="success">{t("Shipment pricing")}</Badge>
+            </span>
+          )}
           {r.accountingAccess && <Badge tone="info">{t("Accounting")}</Badge>}
           {r.transferRole !== "NONE" && (
             <Badge tone="warning">
@@ -198,6 +205,7 @@ function Inner({ tab, filters, team, matrix, modules, roles, countries, activity
           roles={roles}
           modules={modules}
           countries={countries}
+          nextCode={nextCode}
           onClose={() => setForm(null)}
           onSaved={(name) => {
             setForm(null);
@@ -227,6 +235,7 @@ function Inner({ tab, filters, team, matrix, modules, roles, countries, activity
             <KV label="Email" value={view.email} />
             <KV label="Department" value={t(deptLabel(view.department))} />
             <KV label="Roles" value={view.roles.map((r) => t(r.name)).join(", ") || "—"} />
+            <KV label="Shipment work" value={t(view.pricing ? "Pricing (Rate)" : "Data entry")} />
             <KV label="Responsible countries" value={view.countries.length ? view.countries.map((c) => t(c)).join(", ") : t("All countries")} />
             <KV label="Last Login" value={view.lastLoginAt ? fdate(view.lastLoginAt) : "—"} />
             <KV label="Access period" value={view.accessFrom || view.accessUntil ? `${fdate(view.accessFrom)} → ${fdate(view.accessUntil)}` : t("Always")} />
@@ -445,6 +454,7 @@ function EmployeeForm({
   roles,
   modules,
   countries,
+  nextCode,
   onClose,
   onSaved,
 }: {
@@ -452,11 +462,13 @@ function EmployeeForm({
   roles: { key: string; name: string }[];
   modules: { key: string; label: string }[];
   countries: string[];
+  nextCode: string;
   onClose: () => void;
   onSaved: (name: string) => void;
 }) {
   const t = useT();
   const [v, setV] = useState<Required<EmployeeFormValues>>({
+    code: emp ? "" : nextCode,
     name: emp?.name ?? "",
     email: emp?.email ?? "",
     phone: emp?.phone ?? "+252 61 ",
@@ -504,7 +516,19 @@ function EmployeeForm({
       }
     >
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 14 }}>
-        <Input label={t("Employee ID")} value={emp?.code ?? t("Automatic (EMP-…)")} readOnly inputStyle={{ fontFamily: "var(--font-mono)", background: "var(--surface-sunken)" }} />
+        {emp ? (
+          <Input label={t("Employee ID")} value={emp.code} readOnly inputStyle={{ fontFamily: "var(--font-mono)", background: "var(--surface-sunken)" }} />
+        ) : (
+          <Input
+            label={t("Employee ID")}
+            value={v.code}
+            onChange={(e) => set("code", e.target.value.toUpperCase())}
+            placeholder={nextCode}
+            maxLength={20}
+            inputStyle={{ fontFamily: "var(--font-mono)" }}
+            data-testid="employee-code"
+          />
+        )}
         <Input label={t("Name")} value={v.name} onChange={(e) => set("name", e.target.value)} />
         <Input label={t("Phone")} value={v.phone} onChange={(e) => set("phone", e.target.value)} />
         <Input label={t("Gmail")} type="email" value={v.email} onChange={(e) => set("email", e.target.value)} />
@@ -539,11 +563,44 @@ function EmployeeForm({
           <Checkbox key={r.key} label={t(r.name)} checked={v.roleKeys.includes(r.key)} onChange={() => set("roleKeys", toggle(v.roleKeys, r.key))} />
         ))}
       </div>
+      {/* Shipment work (ADR-036): the data team enters cargo; pricing staff set the rates and may change everything. */}
+      <div style={lab}>{t("Shipment work")}</div>
+      <div role="radiogroup" aria-label={t("Shipment work")} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}>
+        {(
+          [
+            ["NONE", "Data entry", "ClipboardList", "Enters customers, boxes, KG and MIX. Sees the rates but can't change them."],
+            ["EDIT", "Pricing (Rate)", "BadgeDollarSign", "Sets Rate, Quality Rate and Brand Rate, and can change everything on a shipment."],
+          ] as const
+        ).map(([lvl, title, icon, desc]) => {
+          // A Super Admin always has Shipment pricing.
+          const superA = v.roleKeys.includes("super_admin");
+          const on = superA ? lvl === "EDIT" : (v.access.pricing === "EDIT") === (lvl === "EDIT");
+          return (
+            <button
+              key={lvl}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              data-testid={`shipment-work-${lvl === "EDIT" ? "pricing" : "data"}`}
+              disabled={superA}
+              onClick={() => set("access", { ...v.access, pricing: lvl })}
+              style={{ display: "flex", gap: 10, alignItems: "flex-start", textAlign: "start", padding: 12, borderRadius: 8, cursor: superA ? "default" : "pointer", border: `1.5px solid ${on ? (lvl === "EDIT" ? "#15803D" : "var(--navy-700)") : "var(--border-default)"}`, background: on ? (lvl === "EDIT" ? "#F0FDF4" : "var(--surface-brand-tint)") : "#fff" }}
+            >
+              <Icon name={icon} size={18} color={lvl === "EDIT" ? "#15803D" : "var(--navy-700)"} />
+              <span style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                <b style={{ font: "700 13px var(--font-body)", color: "var(--text-strong)" }}>{t(title)}</b>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{t(desc)}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
       <div style={lab}>{t("Page access")}</div>
       <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8 }}>{t("Choose for each page: role default, no access, view only, or full.")}</div>
       <div style={{ display: "flex", flexDirection: "column", border: "1px solid var(--border-default)", borderRadius: 8, overflow: "hidden" }}>
         {modules
-          .filter((m) => m.key !== "dashboard")
+          // Shipment pricing is chosen above, under Shipment work.
+          .filter((m) => m.key !== "dashboard" && m.key !== "pricing")
           .map((m) => (
             <div key={m.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", borderBottom: "1px solid var(--border-default)", flexWrap: "wrap" }}>
               <span style={{ flex: 1, minWidth: 120, fontSize: 13, color: "var(--text-strong)" }}>{t(m.label)}</span>

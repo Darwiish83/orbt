@@ -36,7 +36,6 @@ export function CostsTab({ costs, mode, go }: { costs: Costs; mode: "AIR" | "SEA
         <Stat icon="Receipt" label="Total cost" value={money(S.cost)} />
         <Stat icon="Banknote" tone="green" label="Total paid" value={money(S.paid)} />
         <Stat icon="CircleAlert" tone="red" label="Total remaining" value={money(S.remaining)} />
-        <Stat icon="TrendingUp" tone="orange" label="Profit" value={money(S.profit)} />
       </div>
       <FinBox title="Shipment cost payment" pad={0}>
         <div style={{ overflowX: "auto" }}>

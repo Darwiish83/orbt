@@ -72,6 +72,7 @@ const PERMISSIONS: string[] = [
   "accounting:manage",
   "costorigin:write",
   "costmgq:write",
+  "pricing:write",
 ];
 
 // Baseline role → permission mapping (provisional; finalized Phase 3).

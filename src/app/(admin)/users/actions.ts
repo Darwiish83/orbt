@@ -13,6 +13,7 @@ const day = z
   .regex(/^\d{4}-\d{2}-\d{2}$/)
   .transform((d) => new Date(`${d}T00:00:00Z`));
 const form = z.object({
+  code: z.string().trim().max(20).optional(),
   name: z.string().trim().min(1).max(120),
   email: z.string().trim().email().max(160),
   phone: z.string().trim().max(40).optional(),

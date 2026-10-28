@@ -2,7 +2,7 @@ import type { AccessLevel, Department, Prisma, PrismaClient, TransferRole } from
 import { AuthorizationError, ValidationError } from "@/lib/errors";
 import { logAudit } from "@/modules/audit/log";
 import { requirePermission, type AuthzUser } from "@/modules/authz/core";
-import { ADMIN_MODULES, MODULE_KEYS, moduleLevel, modulePermissions } from "@/modules/authz/modules";
+import { ADMIN_MODULES, applyModuleAccess, MODULE_KEYS, moduleLevel, modulePermissions } from "@/modules/authz/modules";
 import { CUSTOMER_ROLE_KEY, SUPER_ADMIN_ROLE_KEY } from "@/modules/authz/permissions";
 import { nextEmployeeCode } from "./employeeCode";
 
@@ -27,6 +27,15 @@ export interface EmployeeRow {
   accountingAccess: boolean;
   transferRole: TransferRole;
   countries: string[];
+  /** Sets Rate, Quality Rate and Brand Rate (Shipment pricing, ADR-036). */
+  pricing: boolean;
+}
+
+/** Whether roles + this employee's module overrides give Shipment pricing. */
+function hasPricing(u: { roles: { role: { key: string; permissions: { permission: { key: string } }[] } }[]; employee: { pageAccess: { page: string; level: AccessLevel }[] } | null }) {
+  if (u.roles.some((r) => r.role.key === SUPER_ADMIN_ROLE_KEY)) return true;
+  const base = new Set(u.roles.flatMap((r) => r.role.permissions.map((p) => p.permission.key)));
+  return applyModuleAccess(base, u.employee?.pageAccess ?? []).has("pricing:write");
 }
 
 export async function listEmployees(db: PrismaClient, actor: AuthzUser, filters: { q?: string; department?: Department } = {}) {
@@ -49,7 +58,7 @@ export async function listEmployees(db: PrismaClient, actor: AuthzUser, filters:
           : {}),
       },
     },
-    include: { employee: { include: { scopes: true } }, roles: { include: { role: true } } },
+    include: { employee: { include: { scopes: true, pageAccess: true } }, roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } } },
     orderBy: { employee: { code: "asc" } },
     take: 500,
   });
@@ -69,6 +78,7 @@ export async function listEmployees(db: PrismaClient, actor: AuthzUser, filters:
       accountingAccess: u.employee!.accountingAccess,
       transferRole: u.employee!.transferRole,
       countries: u.employee!.scopes.map((s) => s.country),
+      pricing: hasPricing(u),
     }));
   return {
     rows,
@@ -91,7 +101,7 @@ export async function getEmployee(db: PrismaClient, actor: AuthzUser, userId: st
   requirePermission(actor, "users:read");
   const u = await db.user.findUnique({
     where: { id: userId },
-    include: { employee: { include: { scopes: true, pageAccess: true } }, roles: { include: { role: true } } },
+    include: { employee: { include: { scopes: true, pageAccess: true } }, roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } } },
   });
   if (!u?.employee) throw new ValidationError("Employee not found");
   const e = u.employee;
@@ -109,6 +119,7 @@ export async function getEmployee(db: PrismaClient, actor: AuthzUser, userId: st
     accountingAccess: e.accountingAccess,
     transferRole: e.transferRole,
     countries: e.scopes.map((s) => s.country),
+    pricing: hasPricing(u),
     access: Object.fromEntries(MODULE_KEYS.map((k) => [k, e.pageAccess.find((p) => p.page === k)?.level ?? null])),
     transferCountries: e.transferCountries,
     accessFrom: e.accessFrom?.toISOString().slice(0, 10) ?? null,
@@ -117,6 +128,8 @@ export async function getEmployee(db: PrismaClient, actor: AuthzUser, userId: st
 }
 
 export interface SaveEmployeeInput {
+  /** Add Employee only: the Employee ID typed by the admin (EMP-…); empty = the next free number. */
+  code?: string;
   name: string;
   email: string;
   phone?: string | null;
@@ -183,14 +196,25 @@ async function writeSettings(tx: Prisma.TransactionClient, employeeId: string, u
   }
 }
 
-/** Add Employee: the Employee ID (EMP-###) is assigned automatically; the
- * person sets their password through "Create Password" on the admin login. */
+/** The Employee ID typed in Add Employee: "EMP-" + letters/digits (the login
+ * only accepts that shape); "7" or "emp-007" are tidied to "EMP-7" / "EMP-007". */
+export function normalizeEmployeeCode(raw: string): string {
+  const up = raw.trim().toUpperCase().replace(/s+/g, "");
+  const code = up.startsWith("EMP-") ? up : `EMP-${up.replace(/^EMP/, "")}`;
+  if (!/^EMP-[A-Z0-9]{1,12}$/.test(code)) throw new ValidationError("Employee ID: EMP- followed by letters or numbers");
+  return code;
+}
+
+/** Add Employee: the admin types the Employee ID (owner 2026-10-28; empty =
+ * the next free EMP-###); the person sets their password through "Create
+ * Password" on the login page. */
 export async function createEmployee(db: PrismaClient, actor: AuthzUser, input: SaveEmployeeInput) {
   requirePermission(actor, "users:manage");
   const { email, roles } = await validate(db, actor, input);
   if (await db.user.findUnique({ where: { email } })) throw new ValidationError("A user with this email already exists");
   return db.$transaction(async (tx) => {
-    const code = await nextEmployeeCode(tx);
+    const code = input.code?.trim() ? normalizeEmployeeCode(input.code) : await nextEmployeeCode(tx);
+    if (await tx.employee.findFirst({ where: { code: { equals: code, mode: "insensitive" } } })) throw new ValidationError("This Employee ID is already in use");
     const employee = await tx.employee.create({ data: { code, name: input.name.trim(), department: input.department, email } });
     const user = await tx.user.create({ data: { email, status: "INVITED", employeeId: employee.id } });
     await writeSettings(tx, employee.id, user.id, input, roles.map((r) => r.id));

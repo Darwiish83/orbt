@@ -20,7 +20,6 @@ export async function uploadDocumentAction(formData: FormData) {
           shipmentId: z.string().max(64).optional(),
           reference: z.string().trim().max(80).optional(),
           filename: z.string().trim().max(180).optional(),
-          kind: z.enum(["INVOICE", "IDENTITY", "CARGO_DOC", "OTHER"]),
           part: z.enum(["ORIGIN_AWB", "TRANSIT_AWB", "CONTAINER"]).optional(),
         })
         .parse({
@@ -29,7 +28,6 @@ export async function uploadDocumentAction(formData: FormData) {
           shipmentId: formData.get("shipmentId") || undefined,
           reference: formData.get("reference") || undefined,
           filename: formData.get("filename") || undefined,
-          kind: formData.get("kind"),
           part: formData.get("part") || undefined,
         });
       const file = formData.get("file");

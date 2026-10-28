@@ -69,7 +69,7 @@ export function TransferReceiptPaper({ r }: { r: TransferReceiptPaperData }) {
         </div>
         <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
           <b style={{ color: INK, fontSize: 15 }}>{t("No")}:</b>
-          <span data-testid="transfer-receipt-no" style={{ font: "700 30px Georgia, 'Times New Roman', serif", color: "#D21F2B", letterSpacing: ".06em" }}>
+          <span data-testid="transfer-receipt-no" style={{ font: "800 30px/1 var(--font-display)", color: "#D21F2B", letterSpacing: ".08em", fontVariantNumeric: "lining-nums tabular-nums" }}>
             {r.number}
           </span>
         </div>

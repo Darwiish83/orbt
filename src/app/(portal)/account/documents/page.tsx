@@ -1,85 +1,20 @@
 import { withUserDb } from "@/db/scoped";
 import { listDocuments } from "@/modules/documents/service";
-import { myTransferReceipts } from "@/modules/transfer/receipts";
-import { money } from "@/ui/format";
 import { requireUser } from "@/modules/authz/session";
-import { Icon } from "@/ui/primitives";
-import { UploadForm } from "./UploadForm";
+import { myRecords, myYears } from "@/modules/portal/customerApp";
+import { myTransferReceipts } from "@/modules/transfer/receipts";
+import { DocumentsView } from "./DocumentsView";
 
-export const metadata = { title: "My documents" };
+export const metadata = { title: "Documents" };
 
-function sizeLabel(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
-export default async function AccountDocumentsPage() {
+/** Customer App → Documents & Records (spec A8–A9), only the customer's own. */
+export default async function AccountDocumentsPage({ searchParams }: { searchParams: Promise<{ tab?: string; year?: string }> }) {
   const user = await requireUser();
-  const [{ items }, transfers] = await withUserDb(user, async (db) => [await listDocuments(db, user, { pageSize: 50 }), await myTransferReceipts(db, user)] as const);
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <h1 style={{ font: "700 24px/1.2 var(--font-display)", color: "var(--text-strong)", margin: 0 }}>Documents</h1>
-      <UploadForm />
-
-      {transfers.length > 0 && (
-        <section style={{ display: "flex", flexDirection: "column", gap: 8 }} data-testid="my-transfer-receipts">
-          <h2 style={{ font: "700 17px var(--font-display)", color: "var(--text-strong)", margin: 0 }}>Transfer receipts</h2>
-          {transfers.map((r) => (
-            <a
-              key={r.id}
-              href={`/account/documents/transfer/${r.id}`}
-              target="_blank"
-              rel="noopener"
-              style={{ background: "var(--surface-card)", border: "1px solid var(--border-default)", borderRadius: "var(--radius-l)", boxShadow: "var(--shadow-1)", padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, textDecoration: "none", color: "inherit" }}
-            >
-              <Icon name="ArrowLeftRight" size={18} color="var(--navy-700)" />
-              <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                <span style={{ color: "var(--text-strong)", fontWeight: 600 }}>
-                  Receipt No. {r.number} · {r.description}
-                </span>
-                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  {r.date.split("-").reverse().join("/")} · {r.currency} {money(r.received)}
-                </span>
-              </span>
-              <span style={{ marginLeft: "auto", color: "var(--navy-700)", fontWeight: 600 }}>View</span>
-            </a>
-          ))}
-        </section>
-      )}
-
-      {items.length === 0 ? (
-        <p style={{ color: "var(--text-muted)" }}>No documents yet.</p>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {items.map((d) => (
-            <div
-              key={d.id}
-              style={{
-                background: "var(--surface-card)",
-                border: "1px solid var(--border-default)",
-                borderRadius: "var(--radius-l)",
-                boxShadow: "var(--shadow-1)",
-                padding: "12px 16px",
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-              }}
-            >
-              <Icon name="FileText" size={18} color="var(--navy-700)" />
-              <span style={{ color: "var(--text-strong)", fontWeight: 600 }}>{d.filename ?? "Document"}</span>
-              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{sizeLabel(d.size)}</span>
-              <a
-                href={`/api/documents/${d.id}/download`}
-                style={{ marginLeft: "auto", color: "var(--navy-700)", fontWeight: 600, textDecoration: "none" }}
-              >
-                Download
-              </a>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  const sp = await searchParams;
+  const years = await withUserDb(user, (db) => myYears(db, user));
+  const year = years.includes(Number(sp.year)) ? Number(sp.year) : years[0]!;
+  const [{ items }, records, transfers] = await withUserDb(user, async (db) => [await listDocuments(db, user, { pageSize: 100 }), await myRecords(db, user, year), await myTransferReceipts(db, user)] as const);
+  const docs = items.map((d) => ({ id: d.id, filename: d.filename ?? "document", size: d.size, date: d.createdAt.toISOString(), reference: d.reference }));
+  const tab = sp.tab === "records" || sp.tab === "transfer" ? sp.tab : "packing";
+  return <DocumentsView docs={docs} records={records} transfers={transfers} year={year} years={years} tab={tab} />;
 }

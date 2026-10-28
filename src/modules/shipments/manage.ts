@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient, Shipment, ShipmentLine } from "@prisma/client";
+import { Prisma, type PrismaClient, type Shipment, type ShipmentLine } from "@prisma/client";
 import { ValidationError } from "@/lib/errors";
 import { assertYearOpen } from "@/modules/accounting/periods";
 import { logAudit } from "@/modules/audit/log";
@@ -7,7 +7,9 @@ import { allowedCountries, requirePermission, requireScope, type AuthzUser } fro
 import { lineMeasure, lineTotal } from "@/modules/finance/charges";
 import { dec, round2, sum } from "@/modules/finance/money";
 import { publicStatusLabel, transitionsFor } from "./stateMachine";
-import type { ShipmentLineInput } from "./service";
+import { packagesOf, readMixParts, type MixPart } from "./mix";
+import { assertPricing, type PricingValues } from "./pricing";
+import { withMix, type ShipmentLineInput } from "./service";
 
 /**
  * Admin → Shipments (spec B6 / revised prompt §7): list with totals, shipment
@@ -42,6 +44,8 @@ function amountFor(mode: Shipment["mode"], lines: ShipmentLine[], invoiceTotal: 
 export interface AdminShipmentRow {
   id: string;
   code: string;
+  /** The SH- code customers see (ADR-034). */
+  publicCode: string;
   mode: "AIR" | "SEA";
   shipDate: string | null;
   arrivalDate: string | null;
@@ -75,6 +79,7 @@ export async function listAdminShipments(
         ? {
             OR: [
               { code: { contains: q, mode: "insensitive" } },
+              { publicCode: { contains: q, mode: "insensitive" } },
               { originCity: { contains: q, mode: "insensitive" } },
               { airDetail: { awbNumber: { contains: q, mode: "insensitive" } } },
               { seaDetail: { blNumber: { contains: q, mode: "insensitive" } } },
@@ -97,6 +102,7 @@ export async function listAdminShipments(
       return {
         id: sh.id,
         code: displayShipmentCode(sh.code),
+        publicCode: sh.publicCode,
         mode: sh.mode as "AIR" | "SEA",
         shipDate: sh.shipDate?.toISOString() ?? null,
         arrivalDate: sh.arrivalDate?.toISOString() ?? null,
@@ -107,7 +113,7 @@ export async function listAdminShipments(
         status: sh.status,
         awb: sh.mode === "AIR" ? (sh.airDetail?.awbNumber ?? null) : (sh.seaDetail?.blNumber ?? null),
         customers: byCustomer.size,
-        packages: sh.lines.reduce((n, l) => n + (l.packages ?? 0) + (l.mixCount ?? 0), 0),
+        packages: packagesOf(sh.lines),
         measure: sum(sh.lines.map((l) => lineMeasure(sh.mode, l))).toString(),
         amount: round2(amount).toString(),
       };
@@ -133,8 +139,11 @@ export interface ShipmentLineRow {
   boxMeasure: string;
   mixCount: number;
   mixMeasure: string;
+  mixParts: MixPart[];
   measure: string;
   rate: string;
+  /** The Rate is set: the customer sees this cargo (ADR-036). */
+  priced: boolean;
   qualityRate: string;
   brandPcs: number;
   brandRate: string;
@@ -161,8 +170,10 @@ export async function getAdminShipment(db: PrismaClient, actor: AuthzUser, shipm
     boxMeasure: s(air ? l.chargeableWeightKg : l.volumeCbm),
     mixCount: l.mixCount ?? 0,
     mixMeasure: s(l.mixKg),
+    mixParts: readMixParts(l.mixParts),
     measure: lineMeasure(sh.mode, l).toString(),
     rate: s(l.rate),
+    priced: l.rate !== null,
     qualityRate: s(l.qualityRate),
     brandPcs: l.brandPcs ?? 0,
     brandRate: s(l.brandRate),
@@ -181,6 +192,7 @@ export async function getAdminShipment(db: PrismaClient, actor: AuthzUser, shipm
     shipment: {
       id: sh.id,
       code: displayShipmentCode(sh.code),
+      publicCode: sh.publicCode,
       mode: sh.mode as "AIR" | "SEA",
       status: sh.status,
       originCountry: sh.originCountry,
@@ -196,7 +208,7 @@ export async function getAdminShipment(db: PrismaClient, actor: AuthzUser, shipm
     lines: rows,
     totals: {
       customers: byCustomer.size,
-      packages: lines.reduce((n, l) => n + (l.packages ?? 0) + (l.mixCount ?? 0), 0),
+      packages: packagesOf(lines),
       measure: totalMeasure.toString(),
       awbKg: awbKg ? awbKg.toString() : null,
       // Total KG − AWB KG (Air): green at 0, red otherwise.
@@ -284,7 +296,7 @@ export async function deleteShipment(db: PrismaClient, actor: AuthzUser, shipmen
 
 function checkLine(mode: Shipment["mode"], input: Partial<ShipmentLineInput>) {
   if (mode === "AIR" && input.volumeCbm != null) throw new ValidationError("Air lines are measured in KG");
-  if (mode === "SEA" && (input.chargeableWeightKg != null || input.mixKg != null)) throw new ValidationError("Sea lines are measured in CBM");
+  if (mode === "SEA" && (input.chargeableWeightKg != null || input.mixKg != null || input.mixParts?.length)) throw new ValidationError("Sea lines are measured in CBM");
   for (const v of [input.packages, input.mixCount, input.brandPcs]) {
     if (v != null && (!Number.isInteger(v) || v < 0)) throw new ValidationError("Counts must be whole numbers");
   }
@@ -296,7 +308,9 @@ export async function updateShipmentLine(db: PrismaClient, actor: AuthzUser, lin
   const line = await db.shipmentLine.findUnique({ where: { id: lineId } });
   if (!line) throw new ValidationError("Line not found");
   const sh = await writable(db, actor, line.shipmentId, "shipments:write");
+  assertPricing(actor, input, line);
   checkLine(sh.mode, input);
+  input = withMix(input);
   return db.$transaction(async (tx) => {
     const updated = await tx.shipmentLine.update({
       where: { id: lineId },
@@ -306,6 +320,7 @@ export async function updateShipmentLine(db: PrismaClient, actor: AuthzUser, lin
         volumeCbm: input.volumeCbm ?? null,
         mixCount: input.mixCount ?? null,
         mixKg: input.mixKg ?? null,
+        mixParts: input.mixParts ? (input.mixParts as Prisma.InputJsonValue) : Prisma.DbNull,
         rate: input.rate ?? null,
         qualityRate: input.qualityRate ?? null,
         brandPcs: input.brandPcs ?? null,
@@ -323,6 +338,33 @@ export async function updateShipmentLine(db: PrismaClient, actor: AuthzUser, lin
       data: { actualMeasure: sum(all.map((l) => lineMeasure(sh.mode, l))) },
     });
     await logAudit(tx, { actorUserId: actor.id, action: "shipment.line_update", entityType: "Shipment", entityId: line.shipmentId, metadata: { lineId } });
+    return updated;
+  });
+}
+
+/** Shipment pricing (ADR-036): Rate, Quality Rate and Brand Rate of one
+ * customer line, set by pricing staff. Empty clears a value; once the Rate is
+ * set the customer sees this cargo in their app. */
+export async function setShipmentLinePricing(db: PrismaClient, actor: AuthzUser, lineId: string, input: PricingValues) {
+  const line = await db.shipmentLine.findUnique({ where: { id: lineId } });
+  if (!line) throw new ValidationError("Line not found");
+  await writable(db, actor, line.shipmentId, "pricing:write");
+  const val = (v: PricingValues[keyof PricingValues]) => {
+    if (v == null || v === "") return null;
+    const d = dec(v);
+    if (d.isNegative()) throw new ValidationError("Rates can't be negative");
+    return d;
+  };
+  const data = { rate: val(input.rate), qualityRate: val(input.qualityRate), brandRate: val(input.brandRate) };
+  return db.$transaction(async (tx) => {
+    const updated = await tx.shipmentLine.update({ where: { id: lineId }, data });
+    await logAudit(tx, {
+      actorUserId: actor.id,
+      action: "shipment.line_pricing",
+      entityType: "Shipment",
+      entityId: line.shipmentId,
+      metadata: { lineId, rate: data.rate?.toString() ?? null, qualityRate: data.qualityRate?.toString() ?? null, brandRate: data.brandRate?.toString() ?? null },
+    });
     return updated;
   });
 }
@@ -356,7 +398,9 @@ export async function notifyShipmentLine(db: PrismaClient, actor: AuthzUser, lin
   const line = await db.shipmentLine.findUnique({ where: { id: lineId } });
   if (!line) throw new ValidationError("Line not found");
   const sh = await scoped(db, actor, line.shipmentId, "shipments:write");
-  const code = displayShipmentCode(sh.code);
+  // Unpriced cargo isn't the customer's to see yet (ADR-036).
+  if (line.rate === null) throw new ValidationError("Enter the Rate first: the customer sees this cargo once it is priced");
+  const code = sh.publicCode;
   await db.$transaction(async (tx) => {
     await tx.notification.create({
       data: {
@@ -406,6 +450,7 @@ export async function searchCustomers(db: PrismaClient, actor: AuthzUser, q: str
 export interface OperationsRow {
   id: string;
   code: string;
+  publicCode: string;
   mode: "AIR" | "SEA";
   status: Shipment["status"];
   originCountry: string;
@@ -437,11 +482,12 @@ export async function listOperations(
   const seq = (code: string) => parseInt(displayShipmentCode(code).replace(/^\D+-/, ""), 10) || 0;
   const rows: OperationsRow[] = all
     .filter((sh) => (!filters.mode || sh.mode === filters.mode) && (!filters.status || sh.status === filters.status))
-    .filter((sh) => !q || [sh.code, sh.originCity ?? "", sh.destCity ?? "", sh.airDetail?.awbNumber ?? "", sh.seaDetail?.blNumber ?? ""].join(" ").toLowerCase().includes(q))
+    .filter((sh) => !q || [sh.code, sh.publicCode, sh.originCity ?? "", sh.destCity ?? "", sh.airDetail?.awbNumber ?? "", sh.seaDetail?.blNumber ?? ""].join(" ").toLowerCase().includes(q))
     .sort((a, b) => (a.mode === b.mode ? seq(a.code) - seq(b.code) : a.mode === "AIR" ? -1 : 1))
     .map((sh) => ({
       id: sh.id,
       code: displayShipmentCode(sh.code),
+      publicCode: sh.publicCode,
       mode: sh.mode as "AIR" | "SEA",
       status: sh.status,
       originCountry: sh.originCountry,
@@ -449,7 +495,7 @@ export async function listOperations(
       destCountry: sh.destCountry,
       destCity: sh.destCity,
       customers: [...new Set(sh.lines.map((l) => l.customer.name))],
-      packages: sh.lines.reduce((n, l) => n + (l.packages ?? 0) + (l.mixCount ?? 0), 0),
+      packages: packagesOf(sh.lines),
       next: transitionsFor(sh.mode)[sh.status],
     }));
   return {
@@ -458,7 +504,7 @@ export async function listOperations(
       total: all.length,
       air: all.filter((x) => x.mode === "AIR").length,
       sea: all.filter((x) => x.mode === "SEA").length,
-      packages: all.reduce((n, sh) => n + sh.lines.reduce((m, l) => m + (l.packages ?? 0) + (l.mixCount ?? 0), 0), 0),
+      packages: all.reduce((n, sh) => n + packagesOf(sh.lines), 0),
     },
   };
 }

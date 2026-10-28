@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/db/client";
 import { AuthorizationError, ValidationError } from "@/lib/errors";
 import { captureError } from "@/lib/logger";
+import { can } from "@/modules/authz/core";
 import { requireUser } from "@/modules/authz/session";
 import { addShipmentLine, createShipment } from "@/modules/shipments/service";
 import {
@@ -13,6 +14,7 @@ import {
   notifyShipmentLine,
   searchCustomers,
   setAwbKg,
+  setShipmentLinePricing,
   updateShipment,
   updateShipmentLine,
 } from "@/modules/shipments/manage";
@@ -113,8 +115,8 @@ export async function setAwbKgAction(shipmentId: string, awbKg: string) {
 const lineForm = z.object({
   packages: count,
   box: qty,
-  mixCount: count,
-  mixMeasure: qty,
+  // Numbered MIX boxes (Air): the server checks each KG and derives count + KG.
+  mixParts: z.array(z.object({ box: z.number().int().min(1).max(999), kg: z.string().trim().max(20) })).max(60),
   rate: qty,
   qualityRate: qty,
   brandPcs: count,
@@ -129,8 +131,7 @@ function toLine(mode: "AIR" | "SEA", v: z.output<typeof lineForm>) {
     packages: v.packages,
     chargeableWeightKg: mode === "AIR" ? v.box : undefined,
     volumeCbm: mode === "SEA" ? v.box : undefined,
-    mixCount: mode === "AIR" ? v.mixCount : undefined,
-    mixKg: mode === "AIR" ? v.mixMeasure : undefined,
+    mixParts: mode === "AIR" ? v.mixParts : undefined,
     rate: v.rate,
     qualityRate: v.qualityRate,
     brandPcs: v.brandPcs,
@@ -150,7 +151,13 @@ export async function addLineAction(shipmentId: string, mode: "AIR" | "SEA", cus
 export async function updateLineAction(shipmentId: string, lineId: string, mode: "AIR" | "SEA", values: LineFormValues) {
   return run(async () => {
     const user = await requireUser();
-    await updateShipmentLine(prisma, user, id.parse(lineId), toLine(mode, lineForm.parse(values)));
+    const v = lineForm.parse(values);
+    // Pricing staff without Shipments edit set only the rates (ADR-036).
+    if (!can(user, "shipments:write") && can(user, "pricing:write")) {
+      await setShipmentLinePricing(prisma, user, id.parse(lineId), { rate: v.rate, qualityRate: v.qualityRate, brandRate: v.brandRate });
+      return;
+    }
+    await updateShipmentLine(prisma, user, id.parse(lineId), toLine(mode, v));
   }, ["/shipments", `/shipments/${shipmentId}`, "/finance"]);
 }
 

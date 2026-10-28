@@ -2,7 +2,6 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/db/client";
 import { AuthorizationError } from "@/lib/errors";
 import { listReceipts } from "@/modules/accounting/service";
-import { getSettings } from "@/modules/settings/service";
 import { getAdminScope } from "@/app/(admin)/scope";
 import { requireUnlocked } from "@/app/(admin)/accounting/gate";
 import { PrintBar } from "../../PrintBar";
@@ -21,11 +20,10 @@ export default async function AccountingReceiptPage({ params }: { params: Promis
   const scope = await getAdminScope(user);
   const r = (await listReceipts(prisma, user, scope, { q: decodeURIComponent(number) })).find((x) => x.number === decodeURIComponent(number));
   if (!r) notFound();
-  const { company } = await getSettings(prisma);
   return (
     <div style={{ maxWidth: 520, margin: "0 auto" }}>
       <PrintBar title={r.number} />
-      <MoneyReceipt r={r} company={{ name: company.name, address: company.address, phone: company.phone }} />
+      <MoneyReceipt r={r} scope={scope} />
     </div>
   );
 }

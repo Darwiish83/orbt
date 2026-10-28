@@ -8,6 +8,8 @@ import { buildSpecInvoice, lineMeasure, type SpecInvoiceInput } from "./charges"
 import { createInvoice, recomputeInvoice } from "./invoices";
 import { dec, round2, sum } from "./money";
 import { recordPayment, recordPaymentTx, reversePaymentTx } from "./payments";
+import { amountInWords } from "./words";
+import { packagesOf as shipmentPackages } from "@/modules/shipments/mix";
 
 /**
  * Finance by shipment (spec B9): every read and write is scoped to the
@@ -77,7 +79,7 @@ export async function listFinanceShipments(
       mode: sh.mode as "AIR" | "SEA",
       shipDate: sh.shipDate?.toISOString() ?? null,
       status: sh.status,
-      packages: sh.lines.reduce((n, l) => n + (l.packages ?? 0) + (l.mixCount ?? 0), 0),
+      packages: shipmentPackages(sh.lines),
       measure: sum(sh.lines.map((l) => lineMeasure(sh.mode, l))).toString(),
     }));
 }
@@ -531,6 +533,11 @@ async function ownInvoice(db: Db, actor: AuthzUser, invoiceId: string) {
  * customer it belongs to (download / print in the portal). */
 export async function getInvoiceDocument(db: PrismaClient, actor: AuthzUser, invoiceId: string): Promise<InvoiceDocument> {
   const inv = isCustomerPrincipal(actor) ? await ownInvoice(db, actor, invoiceId) : await scopedInvoice(db, actor, invoiceId, "invoices:read");
+  return invoiceDocumentOf(db, inv);
+}
+
+/** The invoice paper of an invoice already checked by the caller (staff scope or the customer's own). */
+export async function invoiceDocumentOf(db: Db, inv: Invoice & { shipment: Shipment; lines: ChargeLineItem[] }): Promise<InvoiceDocument> {
   const customer = await db.customer.findUniqueOrThrow({ where: { id: inv.customerId } });
   const order: ChargeLineItem["category"][] = ["FREIGHT", "QUALITY", "BRAND", "FATURA", "LOCAL_DELIVERY", "OTHER", "DEMURRAGE"];
   const lines = [...inv.lines].sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
@@ -540,7 +547,8 @@ export async function getInvoiceDocument(db: PrismaClient, actor: AuthzUser, inv
     status: inv.status,
     date: (inv.issuedAt ?? inv.createdAt).toISOString(),
     mode: inv.shipment.mode as "AIR" | "SEA",
-    shipmentCode: displayShipmentCode(inv.shipment.code),
+    // The invoice goes to the customer: it carries the SH- code (ADR-034).
+    shipmentCode: inv.shipment.publicCode,
     customerName: customer.name,
     customerRef: customer.ref,
     inputs: invoiceInputsOf(inv),
@@ -562,13 +570,60 @@ export async function getInvoiceDocument(db: PrismaClient, actor: AuthzUser, inv
 export interface PaymentReceiptDoc {
   receiptNo: string;
   amount: string;
+  /** The amount in words, ending with "only". */
+  inWords: string;
   customerName: string;
   customerRef: string;
   invoiceNo: string;
+  shipmentCode: string | null;
+  mode: "AIR" | "SEA" | null;
   date: string;
   bank: string | null;
+  invoiceTotal: string;
+  /** Paid on the invoice up to and including this payment (later payments excluded). */
+  paidToDate: string;
+  /** Remaining invoice balance after this payment. */
   balance: string;
   reversed: boolean;
+}
+
+/**
+ * The printed receipt of one payment. Invoice figures are as they stood
+ * right after this payment, so an older receipt keeps showing what was owed
+ * then; reversed payments don't count.
+ */
+export async function paymentReceiptDocOf(db: PrismaClient | Prisma.TransactionClient, paymentId: string) {
+  const payment = await db.payment.findUnique({
+    where: { id: paymentId },
+    include: { customer: true, bank: true, receipt: true, allocations: { include: { invoice: { include: { shipment: true } } } } },
+  });
+  if (!payment || !payment.receipt) return null;
+  const inv = payment.allocations[0]?.invoice ?? null;
+  let paidToDate = dec(0);
+  if (inv) {
+    const allocs = await db.paymentAllocation.findMany({ where: { invoiceId: inv.id }, include: { payment: { select: { id: true, receivedAt: true, createdAt: true, reversedAt: true } } } });
+    const upTo = (p: { receivedAt: Date; createdAt: Date }) =>
+      p.receivedAt < payment.receivedAt || (p.receivedAt.getTime() === payment.receivedAt.getTime() && p.createdAt <= payment.createdAt);
+    paidToDate = sum(allocs.filter((x) => x.payment.id === payment.id || (!x.payment.reversedAt && upTo(x.payment))).map((x) => x.amount));
+  }
+  const amount = round2(payment.amount);
+  const doc: PaymentReceiptDoc = {
+    receiptNo: payment.receipt.number,
+    amount: amount.toFixed(2),
+    inWords: amountInWords(amount.toFixed(2), payment.currency),
+    customerName: payment.customer.name,
+    customerRef: payment.customer.ref,
+    invoiceNo: inv?.number ?? "—",
+    shipmentCode: inv?.shipment?.publicCode ?? null,
+    mode: (inv?.shipment?.mode as "AIR" | "SEA" | undefined) ?? null,
+    date: payment.receivedAt.toISOString(),
+    bank: payment.bank?.name ?? null,
+    invoiceTotal: inv ? round2(inv.total).toFixed(2) : "0.00",
+    paidToDate: round2(paidToDate).toFixed(2),
+    balance: inv ? round2(inv.total.minus(paidToDate)).toFixed(2) : "0.00",
+    reversed: payment.reversedAt !== null,
+  };
+  return { doc, payment, inv };
 }
 
 /** A payment receipt: staff (payments:read, scoped), or the customer who paid
@@ -576,26 +631,12 @@ export interface PaymentReceiptDoc {
 export async function getPaymentReceipt(db: PrismaClient, actor: AuthzUser, paymentId: string): Promise<PaymentReceiptDoc> {
   const customer = isCustomerPrincipal(actor);
   if (!customer) requirePermission(actor, "payments:read");
-  const payment = await db.payment.findUnique({
-    where: { id: paymentId },
-    include: { customer: true, bank: true, receipt: true, allocations: { include: { invoice: { include: { shipment: true } } } } },
-  });
-  if (!payment || !payment.receipt) throw new ValidationError("Receipt not found");
-  if (customer && (payment.customerId !== actor.customerId || payment.reversedAt)) throw new ValidationError("Receipt not found");
-  const inv = payment.allocations[0]?.invoice;
-  if (!inv?.shipment) throw new AuthorizationError("Receipt is not linked to a shipment invoice");
-  if (!customer) requireScope(actor, { country: inv.shipment.originCountry, businessYear: inv.shipment.businessYear });
-  return {
-    receiptNo: payment.receipt.number,
-    amount: s(payment.amount),
-    customerName: payment.customer.name,
-    customerRef: payment.customer.ref,
-    invoiceNo: inv.number,
-    date: payment.receivedAt.toISOString(),
-    bank: payment.bank?.name ?? null,
-    balance: round2(inv.total.minus(inv.amountAllocated)).toString(),
-    reversed: payment.reversedAt !== null,
-  };
+  const r = await paymentReceiptDocOf(db, paymentId);
+  if (!r) throw new ValidationError("Receipt not found");
+  if (customer && (r.payment.customerId !== actor.customerId || r.payment.reversedAt)) throw new ValidationError("Receipt not found");
+  if (!r.inv?.shipment) throw new AuthorizationError("Receipt is not linked to a shipment invoice");
+  if (!customer) requireScope(actor, { country: r.inv.shipment.originCountry, businessYear: r.inv.shipment.businessYear });
+  return r.doc;
 }
 
 export interface MyReceiptRow {

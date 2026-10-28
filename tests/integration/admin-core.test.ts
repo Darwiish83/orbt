@@ -95,6 +95,16 @@ describe("Users & Team: access control enforced on the server", () => {
     expect(can(u, "documents:manage")).toBe(true);
   });
 
+  it("Add Employee takes the Employee ID the admin types; empty = next number; taken or malformed is refused", async () => {
+    const admin = await superAdmin();
+    await role("finance_staff", []);
+    expect((await createEmployee(prisma, admin, emp({ code: "emp-120" }))).code).toBe("EMP-120");
+    expect((await createEmployee(prisma, admin, emp({ code: "7" }))).code).toBe("EMP-7");
+    expect((await createEmployee(prisma, admin, emp({ code: "" }))).code).toBe("EMP-121");
+    await expect(createEmployee(prisma, admin, emp({ code: "EMP-120" }))).rejects.toThrow(/already in use/);
+    await expect(createEmployee(prisma, admin, emp({ code: "OR-3001" }))).rejects.toThrow(/EMP- followed by/);
+    await expect(createEmployee(prisma, admin, emp({ code: "EMP-1 2!" }))).rejects.toThrow(/EMP- followed by/);
+  });
   it("an access window in the past or an inactive employee leaves no permissions", async () => {
     const admin = await superAdmin();
     await role("finance_staff", ["invoices:read"]);
@@ -265,7 +275,9 @@ describe("Announcements, documents and reports", () => {
   it("a customer document shows in that customer's list only; shipment uploads respect the country", async () => {
     const { admin, a, b, w1 } = await world();
     const pdf = Buffer.from("%PDF-1.4\n%test\n");
-    await uploadAdminDocument(prisma, admin, { target: "customer", customerId: a.id, reference: "PL-1", kind: "CARGO_DOC", file: { buffer: pdf, name: "pl.pdf", type: "application/pdf" } });
+    await uploadAdminDocument(prisma, admin, { target: "customer", customerId: a.id, reference: "PL-1", file: { buffer: pdf, name: "pl.pdf", type: "application/pdf" } });
+    // Upload Customer takes packing lists only: no type is chosen.
+    expect((await prisma.document.findFirst({ where: { customerId: a.id } }))!.kind).toBe("CARGO_DOC");
     const mk = async (customerId: string) => {
       const u = await prisma.user.create({ data: { email: `${uniq()}@c.so`, status: "ACTIVE", customerId } });
       return (await loadAuthzUser(prisma, u.id))!;
@@ -275,10 +287,10 @@ describe("Announcements, documents and reports", () => {
     const list = await listAdminDocuments(prisma, admin, { year: 2026, country: "Turkey" });
     expect(list.items[0]).toMatchObject({ reference: "PL-1" });
     const india = await staff(["documents:write"], "India");
-    await expect(uploadAdminDocument(prisma, india, { target: "shipment", shipmentId: w1.id, kind: "CARGO_DOC", file: { buffer: pdf, name: "x.pdf", type: "application/pdf" } })).rejects.toThrow(/scope/);
+    await expect(uploadAdminDocument(prisma, india, { target: "shipment", shipmentId: w1.id, file: { buffer: pdf, name: "x.pdf", type: "application/pdf" } })).rejects.toThrow(/scope/);
 
     // A shipment's papers: air = origin or transit AWB; a container has one document.
-    const ship = (part?: "ORIGIN_AWB" | "TRANSIT_AWB" | "CONTAINER") => uploadAdminDocument(prisma, admin, { target: "shipment", shipmentId: w1.id, kind: "OTHER", part, file: { buffer: pdf, name: "awb.pdf", type: "application/pdf" } });
+    const ship = (part?: "ORIGIN_AWB" | "TRANSIT_AWB" | "CONTAINER") => uploadAdminDocument(prisma, admin, { target: "shipment", shipmentId: w1.id, part, file: { buffer: pdf, name: "awb.pdf", type: "application/pdf" } });
     const mode = (await prisma.shipment.findUniqueOrThrow({ where: { id: w1.id } })).mode;
     if (mode === "AIR") {
       await expect(ship()).rejects.toThrow(/origin AWB or transit AWB/);

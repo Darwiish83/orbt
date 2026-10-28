@@ -22,7 +22,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
     <ShipmentDetailView
       data={data}
       scope={{ years: scope.years, countries: scope.countries.map((c) => c.name) }}
-      perms={{ write: can(user, "shipments:write"), customers: can(user, "customers:read") }}
+      perms={{ write: can(user, "shipments:write"), customers: can(user, "customers:read"), pricing: can(user, "pricing:write") }}
     />
   );
 }

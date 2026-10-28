@@ -713,14 +713,16 @@ export async function listReceipts(db: PrismaClient, actor: AuthzUser, scope: Sc
   scoped(actor, scope);
   const q = filters.q?.trim();
   const receipts = await db.receipt.findMany({
+    // The business year comes from what the money belongs to (the shipment,
+    // the out, the debt), not Receipt.year: that is the numbering year of the
+    // issue date, and an out dated Oct 2026 can belong to business year 2027.
     where: {
-      year: scope.year,
       ...(filters.kind ? { kind: filters.kind } : {}),
       OR: [
-        { payment: { allocations: { some: { invoice: { shipment: { originCountry: scope.country } } } } } },
-        { cashOut: { country: scope.country } },
-        { debtReturn: { cashOut: { country: scope.country } } },
-        { debtReturn: { openingEntry: { country: scope.country } } },
+        { payment: { allocations: { some: { invoice: { shipment: { originCountry: scope.country, businessYear: scope.year } } } } } },
+        { cashOut: { country: scope.country, year: scope.year } },
+        { debtReturn: { cashOut: { country: scope.country, year: scope.year } } },
+        { debtReturn: { openingEntry: { country: scope.country, year: scope.year } } },
       ],
       ...(q ? { AND: [{ OR: [{ number: { contains: q, mode: "insensitive" } }, { counterparty: { contains: q, mode: "insensitive" } }, { customer: { name: { contains: q, mode: "insensitive" } } }] }] } : {}),
     },

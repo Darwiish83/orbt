@@ -42,7 +42,7 @@ Each phase stops for owner approval. Every new query keeps server-side authoriza
 
 **Order change (2026-10-24, owner):** Phase 15 (Finance) runs before Phase 14 (Admin core). Phase 13 (Customer App) is still waiting for approval.
 
-**Status (2026-10-24):** Phases 15, 14, 16 and 17 are done (reports in `docs/progress/PHASE_1{4,5,6,7}_REPORT.md`); the owner asked for them back-to-back. Phase 13 (Customer App) is the remaining phase.
+**Status (2026-10-24):** Phases 15, 14, 16 and 17 are done (reports in `docs/progress/PHASE_1{4,5,6,7}_REPORT.md`); the owner asked for them back-to-back. Phase 13 (Customer App) was built on 2026-10-25 (`docs/progress/PHASE_13_REPORT.md`); all phases 10–17 are now built.
 
 | Phase | Scope | Acceptance criteria |
 |---|---|---|

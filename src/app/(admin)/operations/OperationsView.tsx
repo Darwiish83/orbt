@@ -117,7 +117,9 @@ function Inner({ data, filters, scope, canChange }: Props) {
                   <Icon name={air ? "Plane" : "Ship"} size={17} color={air ? "var(--orange-500)" : "var(--navy-700)"} />
                 </span>
                 <div style={{ minWidth: 90 }}>
-                  <div style={{ font: "700 17px var(--font-mono)", color: "var(--text-strong)" }}>{r.code}</div>
+                  <div style={{ font: "700 17px var(--font-mono)", color: "var(--text-strong)" }}>
+                    {r.code} <span style={{ font: "500 12px var(--font-mono)", color: "var(--text-muted)" }}>{r.publicCode}</span>
+                  </div>
                   <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                     {r.customers.length} {t("Customers")} · {num(r.packages)} {t("Packages")}
                   </div>

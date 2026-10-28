@@ -35,6 +35,8 @@ export interface StatementRow {
   customerRef: string;
   customerName: string;
   shipmentCode: string;
+  /** The SH- code customers know the shipment by (ADR-034). */
+  shipmentPublic: string;
   docNo: string;
   mode: "AIR" | "SEA";
   bank: string | null;
@@ -82,6 +84,7 @@ export async function buildStatement(
       customerRef: i.customer.ref,
       customerName: i.customer.name,
       shipmentCode: displayShipmentCode(i.shipment!.code),
+      shipmentPublic: i.shipment!.publicCode,
       docNo: i.number,
       mode: i.shipment!.mode as "AIR" | "SEA",
       bank: null,
@@ -95,6 +98,7 @@ export async function buildStatement(
       customerRef: a.invoice.customer.ref,
       customerName: a.invoice.customer.name,
       shipmentCode: displayShipmentCode(a.invoice.shipment!.code),
+      shipmentPublic: a.invoice.shipment!.publicCode,
       docNo: a.invoice.number,
       mode: a.invoice.shipment!.mode as "AIR" | "SEA",
       bank: a.payment.bank?.name ?? null,
@@ -431,7 +435,7 @@ export async function sendDemurrageWarning(
   if (sh.status !== "ARRIVED" || !arrived) throw new ValidationError("The shipment has not arrived");
   const cfg = demurrageConfig(input);
   const d = demurrageOf(arrived, now, cfg, Math.max(...lines.map((l) => l.extraFreeDays)));
-  const code = displayShipmentCode(sh.code);
+  const code = sh.publicCode;
   await db.$transaction(async (tx) => {
     const n = await tx.notification.create({
       data: {

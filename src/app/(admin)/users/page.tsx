@@ -5,6 +5,7 @@ import { can } from "@/modules/authz/core";
 import { ADMIN_MODULES } from "@/modules/authz/modules";
 import { requireUser } from "@/modules/authz/session";
 import { listActivity, listEmployees, roleMatrix } from "@/modules/users/admin";
+import { nextEmployeeCode } from "@/modules/users/employeeCode";
 import { UsersView } from "./UsersView";
 
 export const metadata = { title: "Users & Team" };
@@ -18,11 +19,12 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
   const sp = await searchParams;
   const tab = sp.tab === "roles" || sp.tab === "activity" ? sp.tab : "team";
   const dept = DEPTS.includes(sp.dept as Department) ? (sp.dept as Department) : undefined;
-  const [team, matrix, roles, countries] = await Promise.all([
+  const [team, matrix, roles, countries, nextCode] = await Promise.all([
     listEmployees(prisma, user, { q: sp.q, department: dept }),
     roleMatrix(prisma, user),
     prisma.role.findMany({ where: { key: { not: "customer" } }, orderBy: { name: "asc" }, select: { key: true, name: true } }),
     prisma.country.findMany({ where: { active: true, isOrigin: true }, orderBy: { createdAt: "asc" }, select: { name: true } }),
+    nextEmployeeCode(prisma),
   ]);
   const activity =
     tab === "activity" && can(user, "audit:read")
@@ -37,6 +39,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
       modules={ADMIN_MODULES.map((m) => ({ key: m.key, label: m.label }))}
       roles={roles.filter((r) => user.isSuperAdmin || r.key !== "super_admin")}
       countries={countries.map((c) => c.name)}
+      nextCode={nextCode}
       activity={activity}
       me={user.id}
       perms={{ manage: can(user, "users:manage"), superAdmin: user.isSuperAdmin, audit: can(user, "audit:read") }}

@@ -151,6 +151,30 @@
   }
 }
 
+/* Shipment detail customer list: one wide table that scrolls sideways when
+   the screen is narrow (a phone), with a scrollbar you can see and drag. */
+.ship-lines > div {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--navy-300, #8fa3c4) var(--surface-sunken, #f1f3f6);
+  padding-bottom: 4px;
+}
+.ship-lines > div::-webkit-scrollbar {
+  height: 10px;
+}
+.ship-lines > div::-webkit-scrollbar-track {
+  background: var(--surface-sunken, #f1f3f6);
+}
+.ship-lines > div::-webkit-scrollbar-thumb {
+  background: var(--navy-300, #8fa3c4);
+  border-radius: 5px;
+}
+.admin-content .ship-lines table {
+  display: table;
+  white-space: nowrap;
+}
+
 /* RTL: drawer slides in from the right. */
 html[dir="rtl"] .admin-sidebar {
   left: auto;
@@ -233,6 +257,199 @@ html[dir="rtl"] .admin-sidebar {
   }
 }
 
+
+/* ------------------------------------------------------------------ */
+/* Customer App shell (Phase 13, customer-app/App.jsx)                  */
+/* Phone: app bar + bottom nav. Computer (>= 900px): navy sidebar.      */
+/* ------------------------------------------------------------------ */
+.cust-shell {
+  min-height: 100vh;
+  display: flex;
+  background: var(--surface-page);
+}
+.cust-side {
+  display: none;
+}
+.cust-desk-only {
+  display: none;
+}
+.cust-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cust-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 64px;
+  padding: 0 10px;
+  background: #fff;
+  color: var(--text-strong);
+  border-bottom: 1px solid var(--border-default);
+  box-sizing: border-box;
+}
+.cust-bar[data-dark="true"] {
+  background: var(--navy-700);
+  color: #fff;
+  border-bottom: 0;
+}
+.cust-bar-title {
+  flex: 1;
+  min-width: 0;
+  font: 700 17px var(--font-display);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-inline-start: 6px;
+}
+.cust-bar-title[data-tab="true"] {
+  display: none;
+}
+.cust-icon-btn,
+.cust-bell {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+.cust-content {
+  flex: 1;
+  min-width: 0;
+}
+/* Tabs that may be wider than a phone scroll sideways. */
+.cust-scroll-x {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.cust-scroll-x > [role="tablist"] {
+  min-width: max-content;
+  gap: 18px !important;
+}
+.cust-content-inner {
+  padding: 16px 16px 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 760px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+.cust-tabs {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  background: #fff;
+  border-top: 1px solid var(--border-default);
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+}
+.cust-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 0;
+  color: var(--gray-500);
+  font: 500 11px var(--font-body);
+  text-decoration: none;
+}
+.cust-tab[data-on="true"] {
+  color: var(--orange-500);
+  font-weight: 700;
+}
+.cust-tab-icon {
+  width: 44px;
+  height: 28px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cust-tab[data-on="true"] .cust-tab-icon {
+  background: var(--orange-50);
+}
+.cust-side-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 42px;
+  padding: 0 12px;
+  border-radius: var(--radius-s);
+  color: var(--navy-300);
+  font: 500 14px var(--font-body);
+  text-decoration: none;
+  box-sizing: border-box;
+}
+.cust-side-item[data-on="true"] {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 var(--orange-500);
+}
+@media (min-width: 900px) {
+  .cust-side {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 232px;
+    flex: none;
+    padding: 18px 12px;
+    background: var(--navy-700);
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    box-sizing: border-box;
+  }
+  .cust-bar,
+  .cust-bar[data-dark="true"] {
+    min-height: 60px;
+    padding: 0 24px;
+    background: #fff;
+    color: var(--text-strong);
+    border-bottom: 1px solid var(--border-default);
+  }
+  .cust-bar-logo,
+  .cust-phone-only {
+    display: none !important;
+  }
+  .cust-desk-only {
+    display: inline;
+  }
+  .cust-bar-title[data-tab="true"] {
+    display: block;
+  }
+  .cust-tabs {
+    display: none;
+  }
+  .cust-content-inner {
+    padding: 24px 24px 40px;
+  }
+}
+@media print {
+  .cust-shell {
+    display: block;
+  }
+  .cust-content-inner {
+    padding: 0;
+    max-width: none;
+  }
+}
 
 /* Printable documents (/print/*): "Download PDF" uses the browser's Save as PDF. */
 .print-page {

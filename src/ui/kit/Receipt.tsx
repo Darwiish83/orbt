@@ -1,146 +1,72 @@
 "use client";
 
 /* eslint-disable @next/next/no-img-element -- small static brand/bank images */
-import type { ReactNode } from "react";
-import { bankLogo, COMPANY } from "@/config/company";
+import { bankLogo } from "@/config/company";
 import { useT } from "@/i18n/I18nProvider";
 import { Button, Icon } from "@/ui/primitives";
 import { fdate, isPositive, money } from "@/ui/format";
-import { StatusBadge } from "./display";
-import { StampAndSign } from "./Stamp";
+import { PaymentPaper } from "./PaymentPaper";
 
 export interface ReceiptData {
   receiptNo: string;
   /** Decimal string from the server, e.g. "250.00". */
   amount: string;
+  /** The amount in words, ending with "only". */
+  inWords: string;
   customerName: string;
   customerRef: string;
   invoiceNo: string;
+  shipmentCode: string | null;
+  mode: "AIR" | "SEA" | null;
   date: string | Date;
   bank?: string | null;
+  invoiceTotal: string;
+  /** Paid on the invoice up to and including this payment. */
+  paidToDate: string;
   /** Remaining invoice balance after this payment (decimal string). */
   balance: string;
+  reversed?: boolean;
 }
 
-/** Printed payment receipt (orange top rule, amount block, dashed rows). */
-export function ReceiptPaper({ r, compact }: { r: ReceiptData; compact?: boolean }) {
+/**
+ * Customer payment receipt (Style 1, see PaymentPaper). `side="customer"` is
+ * how the customer reads it in their app: they paid, Orbit received — so it
+ * says "Payment confirmation / Amount paid / Paid by" (owner 2026-10-27).
+ */
+export function ReceiptPaper({ r, compact, side = "staff" }: { r: ReceiptData; compact?: boolean; side?: "staff" | "customer" }) {
+  const mine = side === "customer";
   const t = useT();
   const lg = bankLogo(r.bank);
-  const status = isPositive(r.balance) ? "Partial Paid" : "Paid";
-  const fs = compact ? 12 : 13;
-  const row = (l: string, v: ReactNode, mono?: boolean) => (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        gap: 12,
-        padding: "7px 0",
-        borderBottom: "1px dashed var(--border-default)",
-        fontSize: fs,
-        alignItems: "center",
-      }}
-    >
-      <span style={{ color: "var(--text-muted)" }}>{t(l)}</span>
-      <span
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-          color: "var(--text-strong)",
-          fontWeight: 600,
-          textAlign: "end",
-          fontFamily: mono ? "var(--font-mono)" : undefined,
-        }}
-      >
-        {v}
-      </span>
-    </div>
-  );
+  const owing = isPositive(r.balance);
   return (
-    <div
-      style={{
-        background: "#fff",
-        border: "1px solid var(--border-default)",
-        borderTop: "4px solid var(--orange-500)",
-        borderRadius: 8,
-        padding: compact ? 14 : 20,
-        display: "flex",
-        flexDirection: "column",
-        gap: 12,
-      }}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
-        <img src="/brand/orbit-logo.png" alt={COMPANY.name} style={{ height: compact ? 30 : 38 }} />
-        <div style={{ textAlign: "end", fontSize: 10, lineHeight: 1.45, color: "var(--text-muted)" }}>
-          <b style={{ color: "var(--text-strong)", fontSize: 11 }}>{COMPANY.name.toUpperCase()}</b>
-          {COMPANY.addressLines.map((l) => (
-            <span key={l}>
-              <br />
-              {l}
-            </span>
-          ))}
-          <br />
-          {COMPANY.phones.join(" · ")}
-        </div>
-      </div>
-      <div
-        style={{
-          textAlign: "center",
-          padding: "6px 0",
-          borderTop: "1px solid var(--border-default)",
-          borderBottom: "1px solid var(--border-default)",
-        }}
-      >
-        <div
-          style={{
-            font: `800 ${compact ? 17 : 20}px var(--font-display)`,
-            color: "var(--navy-700)",
-            letterSpacing: ".04em",
-          }}
-        >
-          {t("PAYMENT RECEIPT")}
-        </div>
-        <div style={{ font: "600 12px var(--font-mono)", color: "var(--text-muted)", marginTop: 2 }}>{r.receiptNo}</div>
-      </div>
-      <div
-        style={{
-          textAlign: "center",
-          padding: compact ? 10 : 14,
-          background: "var(--surface-sunken)",
-          borderRadius: 8,
-        }}
-      >
-        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("Amount Received")}</div>
-        <div
-          style={{
-            font: `800 ${compact ? 26 : 32}px var(--font-display)`,
-            color: "var(--green-600)",
-            marginTop: 2,
-          }}
-        >
-          {money(r.amount)}
-        </div>
-      </div>
-      <div>
-        {row("Received from", r.customerName)}
-        {row("Customer Reference", r.customerRef, true)}
-        {row("Invoice No.", r.invoiceNo, true)}
-        {row("Payment Date", fdate(r.date))}
-        {row(
-          "Bank",
-          <>
-            {lg && <img src={lg} alt="" style={{ width: 20, height: 20, borderRadius: 4 }} />}
-            {r.bank ?? "—"}
-          </>,
-        )}
-        {row("Remaining Balance", money(r.balance))}
-      </div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
-        <StampAndSign label={t("Cashier Signature")} stamp={compact ? 76 : 92} />
-        <StatusBadge status={status} />
-      </div>
-      <div style={{ textAlign: "center", fontSize: 11, color: "var(--text-muted)" }}>{t("Thank you for choosing Orbit Cargo")}</div>
-    </div>
+    <PaymentPaper
+      compact={compact}
+      title={mine ? "PAYMENT CONFIRMATION" : "PAYMENT RECEIPT"}
+      amountLabel={mine ? "Amount paid" : "Amount received"}
+      amount={money(r.amount)}
+      inWords={r.inWords}
+      numberLabel={mine ? "Payment No." : "Receipt No."}
+      number={r.receiptNo}
+      date={fdate(r.date)}
+      reversed={r.reversed}
+      fields={[
+        [mine ? "Paid by" : "Received from", r.customerName, r.customerRef],
+        [
+          "Paid into",
+          <span key="b" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {lg && <img src={lg} alt="" style={{ width: 18, height: 18, borderRadius: 4 }} />}
+            {r.bank ? t(r.bank) : "—"}
+          </span>,
+        ],
+        ["For invoice", r.invoiceNo, r.shipmentCode ? `${t("Shipment")} ${r.shipmentCode}${r.mode ? ` · ${t(r.mode === "AIR" ? "Air" : "Sea")}` : ""}` : null],
+        ["Status", <span key="s" style={{ color: owing ? "#C2410C" : "var(--status-success)" }}>{t(owing ? "Partially paid" : "Paid in full")}</span>],
+      ]}
+      summary={[
+        { label: "Invoice total", value: money(r.invoiceTotal) },
+        { label: "Paid to date", value: money(r.paidToDate) },
+        { label: "Balance remaining", value: money(r.balance), strong: true, tone: owing ? "orange" : "navy" },
+      ]}
+    />
   );
 }
 

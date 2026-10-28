@@ -6,7 +6,7 @@ type Db = PrismaClient | Prisma.TransactionClient;
 /** Owner spec §0 — banks shown with their logos (account numbers as given). */
 export const BANKS = [
   { name: "Salaam Bank", accountNumber: "37215407", logo: "/banks/salaam.png", isCash: false, sortOrder: 1 },
-  { name: "Dahabshiil Bank", accountNumber: "365258411", logo: "/banks/dahabshiil.png", isCash: false, sortOrder: 2 },
+  { name: "Dahabshiil Bank", accountNumber: "310015695901", logo: "/banks/dahabshiil.png", isCash: false, sortOrder: 2 },
   { name: "Premier Bank", accountNumber: "25687140", logo: "/banks/premier.png", isCash: false, sortOrder: 3 },
   { name: "Cash", accountNumber: null, logo: null, isCash: true, sortOrder: 4 },
 ] as const;

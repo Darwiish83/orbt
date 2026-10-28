@@ -32,6 +32,8 @@ export const ADMIN_MODULES: AdminModule[] = [
   // Accounting cost sheets (spec §11): each filled by its own staff only.
   { key: "costorigin", label: "Operation cost (Origin)", resources: ["costorigin"] },
   { key: "costmgq", label: "Operation cost (MGQ)", resources: ["costmgq"] },
+  // Rate, Quality Rate and Brand Rate on a shipment's customers (ADR-036).
+  { key: "pricing", label: "Shipment pricing", resources: ["pricing"] },
 ];
 
 export const MODULE_KEYS = ADMIN_MODULES.map((m) => m.key);

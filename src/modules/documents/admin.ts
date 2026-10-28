@@ -1,4 +1,4 @@
-import type { DocumentKind, Prisma, PrismaClient, ShipmentDocPart } from "@prisma/client";
+import type { Prisma, PrismaClient, ShipmentDocPart } from "@prisma/client";
 import { AuthorizationError, ValidationError } from "@/lib/errors";
 import { displayShipmentCode } from "@/modules/authz/adminScope";
 import { allowedCountries, requirePermission, requireScope, type AuthzUser } from "@/modules/authz/core";
@@ -85,7 +85,6 @@ export interface AdminUploadInput {
   shipmentId?: string;
   reference?: string;
   filename?: string;
-  kind: DocumentKind;
   /** "Upload Shipment": which paper it is — air: origin or transit AWB; container: one document. */
   part?: ShipmentDocPart;
   file: { buffer: Buffer; name: string; type: string };
@@ -117,7 +116,8 @@ export async function uploadAdminDocument(db: PrismaClient, actor: AuthzUser, in
     buffer: input.file.buffer,
     filename: name,
     declaredType: input.file.type,
-    kind: input.target === "shipment" ? "CARGO_DOC" : input.kind,
+    // Every upload here is a packing list / cargo document (owner 2026-10-27).
+    kind: "CARGO_DOC",
     customerId: input.target === "customer" ? input.customerId : undefined,
     shipmentId: input.shipmentId || undefined,
   });

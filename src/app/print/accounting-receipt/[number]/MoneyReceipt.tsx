@@ -1,57 +1,44 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element -- brand logo */
-import type { ReactNode } from "react";
 import { useT } from "@/i18n/I18nProvider";
 import type { listReceipts } from "@/modules/accounting/service";
-import { StampAndSign, type PaperCompany } from "@/ui/kit";
+import { amountInWords } from "@/modules/finance/words";
+import { PaymentPaper } from "@/ui/kit";
 import { fdate, money } from "@/ui/format";
 
 type R = Awaited<ReturnType<typeof listReceipts>>[number];
 
-/** Receipt paper for an Accounting movement (payment in or money out). */
-export function MoneyReceipt({ r, company }: { r: R; company: PaperCompany }) {
+/** Receipt paper for an Accounting movement: a voucher for money out, a receipt for money in (Style 1). */
+export function MoneyReceipt({ r, scope }: { r: R; scope: { country: string; year: number } }) {
   const t = useT();
   const out = r.direction === "OUT";
-  const row = (l: string, v: ReactNode) => (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px dashed var(--border-default)", fontSize: 13 }}>
-      <span style={{ color: "var(--text-muted)" }}>{t(l)}</span>
-      <b style={{ textAlign: "end" }}>{v}</b>
-    </div>
-  );
+  const words = (() => {
+    try {
+      return amountInWords(r.amount);
+    } catch {
+      return null;
+    }
+  })();
   return (
-    <div style={{ background: "#fff", border: "1px solid var(--border-default)", borderTop: "4px solid var(--orange-500)", borderRadius: 8, padding: 22, display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-        <img src="/brand/orbit-logo.png" alt={company.name} style={{ height: 40 }} />
-        <div style={{ textAlign: "end", fontSize: 10, lineHeight: 1.45, color: "var(--text-muted)" }}>
-          <b style={{ color: "var(--text-strong)", fontSize: 11 }}>{company.name.toUpperCase()}</b>
-          <br />
-          {company.address}
-          <br />
-          {company.phone}
-        </div>
-      </div>
-      <div style={{ textAlign: "center", padding: "6px 0", borderTop: "1px solid var(--border-default)", borderBottom: "1px solid var(--border-default)" }}>
-        <div style={{ font: "800 20px var(--font-display)", color: "var(--navy-700)" }}>{t(out ? "PAYMENT VOUCHER" : "PAYMENT RECEIPT")}</div>
-        <div style={{ font: "600 12px var(--font-mono)", color: "var(--text-muted)" }}>{r.number}</div>
-      </div>
-      <div style={{ textAlign: "center", padding: 14, background: "var(--surface-sunken)", borderRadius: 8 }}>
-        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t(out ? "Amount Paid" : "Amount Received")}</div>
-        <div style={{ font: "800 30px var(--font-display)", color: out ? "var(--red-600)" : "var(--green-600)", textDecoration: r.reversed ? "line-through" : undefined }}>{money(r.amount)}</div>
-        {r.reversed && <div style={{ fontSize: 12, color: "var(--red-600)", fontWeight: 700 }}>{t("Reversed")}</div>}
-      </div>
-      <div>
-        {row("Type", t(r.kindLabel))}
-        {row(out ? "Sent to" : "Received from", r.party)}
-        {out && r.via && row("Sent via", r.via)}
-        {row("Date", fdate(r.date))}
-        {row(out ? "Paid from" : "Bank", r.bank ? t(r.bank) : "—")}
-        {r.note && row("Note", r.note)}
-      </div>
-      <div style={{ marginTop: 8 }}>
-        <StampAndSign label={t("Cashier Signature")} />
-      </div>
-      <div style={{ textAlign: "center", fontSize: 12, color: "var(--text-muted)" }}>{t("Thank you for choosing Orbit Cargo")}</div>
-    </div>
+    <PaymentPaper
+      title={out ? "PAYMENT VOUCHER" : "PAYMENT RECEIPT"}
+      amountLabel={out ? "Amount paid" : "Amount received"}
+      amount={money(r.amount)}
+      inWords={words}
+      numberLabel={out ? "Voucher No." : "Receipt No."}
+      number={r.number}
+      date={fdate(r.date)}
+      reversed={r.reversed}
+      fields={[
+        [out ? "Paid to" : "Received from", r.party, out ? r.via : null],
+        [out ? "Paid from" : "Paid into", r.bank ? t(r.bank) : "—"],
+        [out ? "Payment for" : "Type", t(r.kindLabel)],
+        ["Country · year", `${t(scope.country)} · ${scope.year}`],
+      ]}
+      summary={[
+        ...(r.note ? [{ label: "Note", value: r.note }] : []),
+        { label: out ? "Total paid" : "Total received", value: money(r.amount), strong: true, tone: "navy" as const },
+      ]}
+    />
   );
 }

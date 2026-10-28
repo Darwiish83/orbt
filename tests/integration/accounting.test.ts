@@ -189,6 +189,13 @@ describe("Income & Out", () => {
     const voucher = (await listReceipts(prisma, admin, TR, {})).find((r) => r.number === o.receiptNo)!;
     expect([voucher.party, voucher.via]).toEqual(["Istanbul agent", "EVC Plus 615123456"]);
     expect((await incomeAndOut(prisma, admin, TR)).outs.find((x) => x.receiptNo === o.receiptNo)).toMatchObject({ sentTo: "Istanbul agent", sentVia: "EVC Plus", sentAccount: "615123456" });
+    // An out of business year 2027 paid in Oct 2026 is numbered RCP-2026-…,
+    // yet its receipt belongs to (and opens from) 2027, not 2026.
+    const TR27 = { country: "Turkey", year: 2027 };
+    const early = await addOut(prisma, admin, TR27, { category: "EXPENSE", amount: "5", bankId: salaam.id, paidAt: D("2026-10-26"), sentTo: "abdirashid", sentVia: "EVC Plus" });
+    expect(early.receiptNo).toMatch(/^RCP-2026-\d+$/);
+    expect((await listReceipts(prisma, admin, TR27, { q: early.receiptNo })).map((r) => r.number)).toEqual([early.receiptNo]);
+    expect((await listReceipts(prisma, admin, TR, {})).some((r) => r.number === early.receiptNo)).toBe(false);
     await addOut(prisma, admin, TR, { category: "EXPENSE", amount: "30", bankId: salaam.id, paidAt: D("2026-10-07"), note: "Office" });
 
     let io = await incomeAndOut(prisma, admin, TR);
