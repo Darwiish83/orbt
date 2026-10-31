@@ -135,7 +135,8 @@ function Inner({ data }: { data: NonNullable<Data> }) {
         )}
       </div>
       <div style={{ background: "#fff", border: "1px solid #9AA3AF", overflowX: "auto" }}>
-        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 900, display: "table", whiteSpace: "normal" }}>
+        {/* Phones: each transfer is a card that keeps the report title (globals.css .dt-table.dt-titled). */}
+        <table className="dt-table dt-titled" style={{ borderCollapse: "collapse", width: "100%", minWidth: 900, display: "table", whiteSpace: "normal" }}>
           <thead>
             <tr>
               <th colSpan={13} style={{ ...th, background: "#BDD7EE", fontSize: 14, padding: 8 }}>
@@ -165,12 +166,13 @@ function Inner({ data }: { data: NonNullable<Data> }) {
               const s = r.sent;
               return (
                 <tr key={r.id} data-testid={`tr-${r.description}`}>
-                  <td style={{ ...td, background: rb }}>{d(r.receivedAt)}</td>
-                  <td style={{ ...td, background: rb, textAlign: "end", fontWeight: 600 }}>{f2(r.net)}</td>
-                  <td style={{ ...td, background: rb, textAlign: "end", color: "#B91C1C" }}>{Number(r.feePct) ? `${r.feePct}% · ${f2(r.fee)}` : "-"}</td>
-                  <td style={{ ...td, background: rb, textAlign: "end", fontWeight: 700 }}>{f2(r.amount)}</td>
-                  <td style={{ ...td, background: rb, textAlign: "center" }}>{r.currency}</td>
+                  <td data-label={t("DATE")} style={{ ...td, background: rb }}>{d(r.receivedAt)}</td>
+                  <td data-label={t("AMOUNT")} style={{ ...td, background: rb, textAlign: "end", fontWeight: 600 }}>{f2(r.net)}</td>
+                  <td data-label={t("TRANSFER FEE")} style={{ ...td, background: rb, textAlign: "end", color: "#B91C1C" }}>{Number(r.feePct) ? `${r.feePct}% · ${f2(r.fee)}` : "-"}</td>
+                  <td data-label={t("TOTAL AMOUNT")} style={{ ...td, background: rb, textAlign: "end", fontWeight: 700 }}>{f2(r.amount)}</td>
+                  <td data-label={t("CURRENCY")} style={{ ...td, background: rb, textAlign: "center" }}>{r.currency}</td>
                   <td
+                    data-label={t("DESCRIPTION")}
                     onClick={() => A.canReceive && !s && setForm({ id: r.id, country, kind, receivedAt: r.receivedAt, amount: r.amount, feePct: r.feePct, currency: r.currency, description: r.description, tag: r.tag })}
                     style={{ ...td, background: kind === "CUSTOMER" ? tagBg : "#C9D9F5", textAlign: "center", cursor: A.canReceive && !s ? "pointer" : "default", minWidth: 220, fontWeight: 600 }}
                   >
@@ -178,15 +180,15 @@ function Inner({ data }: { data: NonNullable<Data> }) {
                   </td>
                   {s ? (
                     <>
-                      <td style={td}>{d(s.sentAt)}</td>
-                      <td style={{ ...td, textAlign: "end", fontWeight: 600 }}>{f2(s.delivered)}</td>
-                      <td style={{ ...td, textAlign: "end", color: "#B91C1C" }}>{Number(s.fee) ? `−${f2(s.fee)}` : "-"}</td>
-                      <td style={{ ...td, textAlign: "end", fontWeight: 700 }}>{f2(s.amount)}</td>
-                      <td style={{ ...td, textAlign: "center" }}>{s.currency}</td>
-                      <td style={{ ...td, textAlign: "center", fontWeight: 600, color: s.status === "PAID" ? "#111" : "#C2410C" }}>{t(s.status)}</td>
+                      <td data-label={`${t("MONEY TRANSFER")} · ${t("DATE")}`} style={td}>{d(s.sentAt)}</td>
+                      <td data-label={`${t("MONEY TRANSFER")} · ${t("AMOUNT")}`} style={{ ...td, textAlign: "end", fontWeight: 600 }}>{f2(s.delivered)}</td>
+                      <td data-label={`${t("MONEY TRANSFER")} · ${t("TRANSFER FEE")}`} style={{ ...td, textAlign: "end", color: "#B91C1C" }}>{Number(s.fee) ? `−${f2(s.fee)}` : "-"}</td>
+                      <td data-label={`${t("MONEY TRANSFER")} · ${t("TOTAL AMOUNT")}`} style={{ ...td, textAlign: "end", fontWeight: 700 }}>{f2(s.amount)}</td>
+                      <td data-label={`${t("MONEY TRANSFER")} · ${t("CURRENCY")}`} style={{ ...td, textAlign: "center" }}>{s.currency}</td>
+                      <td data-label={t("STATUS")} style={{ ...td, textAlign: "center", fontWeight: 600, color: s.status === "PAID" ? "#111" : "#C2410C" }}>{t(s.status)}</td>
                     </>
                   ) : (
-                    <td colSpan={6} style={{ ...td, textAlign: "center" }}>
+                    <td colSpan={6} data-label="" style={{ ...td, textAlign: "center" }}>
                       {A.canSend && r.handed ? (
                         <button type="button" onClick={() => setSend({ id: r.id, sentAt: today(), amount: r.amount, currency: r.currency, status: "PAID", feePct: r.feePct, fee: r.fee })} style={{ border: 0, background: "transparent", color: "#C2410C", font: "600 12px var(--font-body)", cursor: "pointer" }} data-testid={`add-send-${r.description}`}>
                           + {t("Add transfer")}
@@ -196,7 +198,7 @@ function Inner({ data }: { data: NonNullable<Data> }) {
                       )}
                     </td>
                   )}
-                  <td style={{ ...td, textAlign: "center", width: 80 }}>
+                  <td data-label="" style={{ ...td, textAlign: "center", width: 80 }}>
                     <span style={{ display: "inline-flex", gap: 2 }}>
                       {kind === "CUSTOMER" &&
                         (r.receipt ? (
@@ -220,26 +222,26 @@ function Inner({ data }: { data: NonNullable<Data> }) {
             })}
             {!R.rows.length && (
               <tr>
-                <td colSpan={13} style={{ ...td, textAlign: "center", padding: 24, color: "var(--text-muted)" }}>
+                <td colSpan={13} className="dt-empty" style={{ ...td, textAlign: "center", padding: 24, color: "var(--text-muted)" }}>
                   {t("No records found")}
                 </td>
               </tr>
             )}
             {R.rows.length > 0 && (
               <tr>
-                <td style={{ ...td, fontWeight: 700 }}>{t("Total")}</td>
-                <td style={{ ...td, textAlign: "end", fontWeight: 700 }}>{f2(R.totals.received)}</td>
-                <td style={{ ...td, textAlign: "end", fontWeight: 700, color: "#B91C1C" }}>{f2(R.totals.fees)}</td>
-                <td style={{ ...td, textAlign: "end", fontWeight: 700 }}>{f2(Number(R.totals.received) + Number(R.totals.fees))}</td>
+                <td data-label="" style={{ ...td, fontWeight: 700 }}>{t("Total")}</td>
+                <td data-label={t("AMOUNT")} style={{ ...td, textAlign: "end", fontWeight: 700 }}>{f2(R.totals.received)}</td>
+                <td data-label={t("TRANSFER FEE")} style={{ ...td, textAlign: "end", fontWeight: 700, color: "#B91C1C" }}>{f2(R.totals.fees)}</td>
+                <td data-label={t("TOTAL AMOUNT")} style={{ ...td, textAlign: "end", fontWeight: 700 }}>{f2(Number(R.totals.received) + Number(R.totals.fees))}</td>
                 <td colSpan={3} style={td} />
-                <td style={{ ...td, textAlign: "end", fontWeight: 700 }}>{f2(R.totals.sent)}</td>
+                <td data-label={`${t("MONEY TRANSFER")} · ${t("AMOUNT")}`} style={{ ...td, textAlign: "end", fontWeight: 700 }}>{f2(R.totals.sent)}</td>
                 <td colSpan={5} style={td} />
               </tr>
             )}
           </tbody>
         </table>
       </div>
-      <div style={{ display: "flex", alignItems: "center", borderTop: "1px solid var(--border-default)", overflowX: "auto" }}>
+      <div className="tr-months" style={{ display: "flex", alignItems: "center", borderTop: "1px solid var(--border-default)", overflowX: "auto" }}>
         {A.canReceive && (
           <button type="button" onClick={() => act(newMonthAction(country), "New month started", undefined, () => go({ month: null }))} disabled={R.months[0]!.month >= 12 || busy} style={{ display: "inline-flex", alignItems: "center", gap: 6, flex: "none", height: 32, marginInlineEnd: 10, padding: "0 12px", borderRadius: 6, border: "1.5px dashed var(--navy-700)", background: "#fff", color: "var(--navy-700)", font: "600 12px var(--font-body)", cursor: "pointer", whiteSpace: "nowrap", opacity: R.months[0]!.month >= 12 ? 0.4 : 1 }}>
             <Icon name="Plus" size={14} />

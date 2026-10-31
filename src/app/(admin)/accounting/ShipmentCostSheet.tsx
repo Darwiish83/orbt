@@ -311,7 +311,8 @@ function ProfitTable({ rows, air, perms }: { rows: CostShipment[]; air: boolean;
   });
   return (
     <div style={{ background: "#fff", border: `1px solid ${air ? "var(--border-default)" : "#9AA3AF"}`, borderRadius: air ? "var(--radius-l)" : 0, overflow: "auto", maxHeight: "70vh" }}>
-      <table style={{ borderCollapse: "separate", borderSpacing: 0, minWidth: "100%" }}>
+      {/* Phones: rows become cards (globals.css .dt-table), no sideways scrolling. */}
+      <table className="dt-table" style={{ borderCollapse: "separate", borderSpacing: 0, minWidth: "100%" }}>
         <thead>
           <tr>
             {cols.map((c, i) => (
@@ -325,7 +326,7 @@ function ProfitTable({ rows, air, perms }: { rows: CostShipment[]; air: boolean;
           {rows.map((r, ri) => (
             <tr key={r.id} data-testid={`sheet-row-${r.code}`}>
               {cols.map((c, i) => (
-                <td key={c.h} style={td(c, i)} title={c.title ? t(c.title(r)) : undefined}>
+                <td key={c.h} data-label={t(c.h)} style={td(c, i)} title={c.title ? t(c.title(r)) : undefined}>
                   {c.in ? <Cell r={r} sheet="origin" field={c.in} label={c.h} disabled={!perms.origin} placeholder={air ? "0" : "0.00"} /> : c.get!(r, ri)}
                 </td>
               ))}
@@ -333,7 +334,7 @@ function ProfitTable({ rows, air, perms }: { rows: CostShipment[]; air: boolean;
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={cols.length} style={{ padding: 30, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+              <td colSpan={cols.length} className="dt-empty" style={{ padding: 30, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
                 {t("No records found")}
               </td>
             </tr>

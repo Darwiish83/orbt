@@ -22,7 +22,7 @@ test("landing page shows the brand hero", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/our priority/i);
   await expect(page.getByRole("link", { name: /customer & admin login/i })).toBeVisible();
-  await expect(page.getByTestId("developer-credit")).toContainText("Designed & developed by Darwiish.dev");
+  await expect(page.getByTestId("developer-credit")).toContainText("Developed by Darwiish.dev");
 });
 
 test("the sign-in page carries the copyright and developer credit", async ({ page }) => {
@@ -30,8 +30,13 @@ test("the sign-in page carries the copyright and developer credit", async ({ pag
   const credit = page.getByTestId("developer-credit");
   await expect(credit).toContainText(/© \d{4} Orbit Cargo & Logistics\. All rights reserved\./);
   await expect(credit).toContainText("Darwiish.dev");
+  // The signature opens WhatsApp with a prepared message (number fixed in code).
+  const link = credit.getByTestId("developer-link");
+  await expect(link).toHaveAttribute("href", /^https:\/\/wa\.me\/252617589166\?text=Salaam%20Darwiish/);
+  await expect(link).toHaveAttribute("target", "_blank");
+  await expect(link).toHaveAttribute("rel", "noopener noreferrer");
   await page.getByRole("button", { name: "SO" }).click();
-  await expect(credit).toContainText("Waxaa naqshadeeyay oo dhisay Darwiish.dev");
+  await expect(credit).toContainText("Waxaa sameeyay Darwiish.dev");
 });
 
 test("unauthenticated access to staff areas and the portal goes to the one sign-in page", async ({ page }) => {
@@ -136,6 +141,17 @@ test.describe("authenticated session", () => {
     await expect(page).toHaveURL(/\/login$/);
   });
 
+  test("Accounting asks for the PIN; Shipment cost opens without one", async ({ page }) => {
+    test.setTimeout(120_000);
+    await staffLogin(page);
+    await page.goto("/accounting");
+    await expect(page.getByTestId("acc-pin")).toBeVisible({ timeout: 60_000 });
+    await page.goto("/shipment-cost");
+    await expect(page.getByRole("heading", { name: /shipment cost/i, level: 1 })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId("sheet-totals")).toBeVisible();
+    await expect(page.getByTestId("acc-pin")).toHaveCount(0);
+  });
+
   test("creates a customer through the authorized admin form", async ({ page }) => {
     await staffLogin(page);
     await page.goto("/customers");
@@ -159,6 +175,8 @@ test.describe("authenticated session", () => {
 
 test.describe("customer portal", () => {
   test("customer lands on the portal; documents can be downloaded but not uploaded", async ({ page }) => {
+    // Several pages: on a cold dev server each compiles on first visit.
+    test.setTimeout(120_000);
     await page.goto("/login");
     await page.getByLabel("Employee ID or Customer Reference").fill(E2E_CUSTOMER_REF);
     await page.getByLabel("Gmail").fill(E2E_CUSTOMER_EMAIL);

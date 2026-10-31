@@ -63,6 +63,14 @@
   padding: 18px 12px;
   gap: 2px;
   overflow-y: auto;
+  /* Stays in view while the page scrolls, so the account footer (email,
+     Logout, credit) is always on screen; a short window scrolls the sidebar. */
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  /* Content-box (the design's width): the height leaves room for the 18px top/bottom padding. */
+  height: calc(100vh - 36px);
+  height: calc(100dvh - 36px);
 }
 .admin-main {
   flex: 1;
@@ -98,6 +106,9 @@
     top: 0;
     bottom: 0;
     left: 0;
+    /* Undo the desktop sticky sizing: the drawer fills the screen top to bottom. */
+    height: auto;
+    align-self: auto;
     z-index: 60;
     width: 272px;
     transform: translateX(-100%);
@@ -148,6 +159,115 @@
     width: 100%;
     overflow-x: auto;
     white-space: nowrap;
+  }
+}
+
+/* Data tables on phones (DataTable, owner 2026-10-30): no sideways scrolling —
+   each row is a card of "LABEL  value" lines, the header row is hidden, and a
+   row that opens something still opens it. Desktop and print keep the table. */
+@media screen and (max-width: 767px) {
+  .dt-table,
+  .dt-table tbody,
+  .dt-table tr,
+  .dt-table td {
+    display: block !important;
+    width: 100% !important;
+    box-sizing: border-box;
+    white-space: normal !important;
+  }
+  .dt-table thead {
+    display: none !important;
+  }
+  .dt-table tr {
+    margin: 0 0 10px;
+    padding: 6px 0;
+    border: 1px solid var(--border-default) !important;
+    border-radius: var(--radius-m);
+    background: var(--surface-card);
+  }
+  /* Label floats at the start; the cell's own content (one or several pieces)
+     stays together at the end. */
+  .dt-table td:not(.dt-empty) {
+    display: flow-root !important;
+    padding: 7px 12px !important;
+    text-align: end !important;
+    overflow-wrap: anywhere;
+  }
+  .dt-table td:not(.dt-empty)::before {
+    content: attr(data-label);
+    float: inline-start;
+    max-width: 45%;
+    margin-inline-end: 12px;
+    padding-top: 2px;
+    text-align: start;
+    font: 700 11px var(--font-body);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .dt-table td[data-label=""]::before {
+    content: none;
+  }
+  .dt-table {
+    min-width: 0 !important;
+  }
+  /* Empty spacer cells (colSpan fillers) have nothing to show in a card. */
+  .dt-table td:empty {
+    display: none !important;
+  }
+  /* A table whose first header row is a title (Money Status Report) keeps it. */
+  .dt-table.dt-titled thead {
+    display: block !important;
+  }
+  .dt-table.dt-titled thead tr:not(:first-child) {
+    display: none !important;
+  }
+  .dt-table.dt-titled thead th {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+  }
+  /* Tab bars, segment switches and the month bar wrap onto a second line
+     instead of sliding sideways. */
+  [role="tablist"],
+  [role="radiogroup"],
+  .tr-months {
+    flex-wrap: wrap !important;
+    overflow-x: visible !important;
+  }
+  .cust-scroll-x {
+    overflow-x: visible !important;
+  }
+  .cust-scroll-x > [role="tablist"] {
+    min-width: 0 !important;
+  }
+  /* Sticky columns/headers belong to the desktop table only. */
+  .dt-table th,
+  .dt-table td {
+    position: static !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    box-shadow: none !important;
+  }
+}
+
+/* Reports on phones: tighter padding and wrapping cells so every column fits
+   the screen. Print / PDF keeps the full layout. */
+@media screen and (max-width: 767px) {
+  .report-doc {
+    padding: 18px 14px !important;
+  }
+  .report-doc table:not(.dt-table) {
+    display: table !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    white-space: normal !important;
+  }
+  .report-doc th,
+  .report-doc td {
+    padding: 8px 6px !important;
+    white-space: normal !important;
+    font-size: 12px !important;
   }
 }
 

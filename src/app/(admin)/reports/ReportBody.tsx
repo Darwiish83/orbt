@@ -76,7 +76,7 @@ export function ReportBody({ r }: { r: ReportData }) {
   ];
 
   return (
-    <article style={{ background: "#fff", border: "1px solid var(--border-default)", borderTop: "4px solid var(--orange-500)", borderRadius: 10, padding: "28px 32px", display: "flex", flexDirection: "column", gap: 26 }}>
+    <article className="report-doc" style={{ background: "#fff", border: "1px solid var(--border-default)", borderTop: "4px solid var(--orange-500)", borderRadius: 10, padding: "28px 32px", display: "flex", flexDirection: "column", gap: 26 }}>
       {/* Header */}
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap", paddingBottom: 18, borderBottom: `2px solid ${INK}` }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -213,16 +213,16 @@ export function ReportBody({ r }: { r: ReportData }) {
       {showCountries && (
         <section style={{ breakInside: "avoid" }}>
           {head("By country")}
-          <Table head={["Country", "Shipments", "Invoiced", "Collected", "Outstanding"]}>
+          <Table cards head={["Country", "Shipments", "Invoiced", "Collected", "Outstanding"]}>
             {r.byCountry.map((c) => (
               <tr key={c.country}>
-                <td style={first}>{t(c.country)}</td>
-                <td style={td}>
+                <td data-label={t("Country")} style={first}>{t(c.country)}</td>
+                <td data-label={t("Shipments")} style={td}>
                   {c.shipments} <span style={{ color: "var(--text-muted)", fontSize: 12 }}>({c.air} {t("air")} · {c.sea} {t("sea")})</span>
                 </td>
-                <td style={td}>{money(c.revenue)}</td>
-                <td style={{ ...td, color: "var(--green-600)" }}>{money(c.collected)}</td>
-                <td style={{ ...td, color: Number(c.outstanding) > 0 ? "var(--red-600)" : undefined }}>{money(c.outstanding)}</td>
+                <td data-label={t("Invoiced")} style={td}>{money(c.revenue)}</td>
+                <td data-label={t("Collected")} style={{ ...td, color: "var(--green-600)" }}>{money(c.collected)}</td>
+                <td data-label={t("Outstanding")} style={{ ...td, color: Number(c.outstanding) > 0 ? "var(--red-600)" : undefined }}>{money(c.outstanding)}</td>
               </tr>
             ))}
           </Table>
@@ -296,11 +296,13 @@ export function ReportBody({ r }: { r: ReportData }) {
   );
 }
 
-function Table({ head, children }: { head: string[]; children: ReactNode }) {
+/** `cards`: on a phone screen each row becomes a labelled card (globals.css .dt-table);
+ * cells then need data-label. Print / PDF always keeps the table. */
+function Table({ head, children, cards }: { head: string[]; children: ReactNode; cards?: boolean }) {
   const t = useT();
   return (
     <div style={{ overflowX: "auto", border: "1px solid var(--border-default)", borderRadius: 8 }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 420 }}>
+      <table className={cards ? "dt-table" : undefined} style={{ width: "100%", borderCollapse: "collapse", minWidth: 420 }}>
         <thead>
           <tr>
             {head.map((h, i) => (

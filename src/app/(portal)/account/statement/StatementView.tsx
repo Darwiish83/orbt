@@ -20,7 +20,8 @@ export function StatementView({ fin, me, year }: { fin: Fin; me: Me; year: numbe
   const T = fin.totals;
   const table = (head: string[], rows: React.ReactNode) => (
     <div style={{ overflowX: "auto", border: "1px solid var(--border-default)", borderRadius: 8 }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 480 }}>
+      {/* Phones: each line is a card (globals.css .dt-table); print keeps the table. */}
+      <table className="dt-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 480 }}>
         <thead>
           <tr>
             {head.map((h, i) => (
@@ -79,13 +80,13 @@ export function StatementView({ fin, me, year }: { fin: Fin; me: Me; year: numbe
           ["Date", "Invoice No.", "Shipment", "Amount", "Paid", "Balance", "Status"],
           fin.invoices.map((i) => (
             <tr key={i.id}>
-              <td style={{ ...td, textAlign: "start" }}>{fdate(i.date)}</td>
-              <td style={{ ...td, textAlign: "start", fontFamily: "var(--font-mono)" }}>{i.number}</td>
-              <td style={td}>{i.shipment}</td>
-              <td style={td}>{money(i.total)}</td>
-              <td style={{ ...td, color: "var(--green-600)" }}>{money(i.paid)}</td>
-              <td style={{ ...td, color: Number(i.balance) > 0 ? "var(--red-600)" : undefined, fontWeight: 700 }}>{money(i.balance)}</td>
-              <td style={td}>
+              <td data-label={t("Date")} style={{ ...td, textAlign: "start" }}>{fdate(i.date)}</td>
+              <td data-label={t("Invoice No.")} style={{ ...td, textAlign: "start", fontFamily: "var(--font-mono)" }}>{i.number}</td>
+              <td data-label={t("Shipment")} style={td}>{i.shipment}</td>
+              <td data-label={t("Amount")} style={td}>{money(i.total)}</td>
+              <td data-label={t("Paid")} style={{ ...td, color: "var(--green-600)" }}>{money(i.paid)}</td>
+              <td data-label={t("Balance")} style={{ ...td, color: Number(i.balance) > 0 ? "var(--red-600)" : undefined, fontWeight: 700 }}>{money(i.balance)}</td>
+              <td data-label={t("Status")} style={td}>
                 <StatusBadge status={INVOICE_STATUS_LABEL[i.status]} />
               </td>
             </tr>
@@ -96,11 +97,11 @@ export function StatementView({ fin, me, year }: { fin: Fin; me: Me; year: numbe
           ["Date", "Payment No.", "Invoice No.", "Bank", "Amount"],
           fin.payments.map((p) => (
             <tr key={p.id}>
-              <td style={{ ...td, textAlign: "start" }}>{fdate(p.date)}</td>
-              <td style={{ ...td, textAlign: "start", fontFamily: "var(--font-mono)" }}>{p.receiptNo}</td>
-              <td style={{ ...td, fontFamily: "var(--font-mono)" }}>{p.invoiceNo}</td>
-              <td style={td}>{p.bank ? t(p.bank) : "—"}</td>
-              <td style={{ ...td, color: "var(--green-600)", fontWeight: 700 }}>{money(p.amount)}</td>
+              <td data-label={t("Date")} style={{ ...td, textAlign: "start" }}>{fdate(p.date)}</td>
+              <td data-label={t("Payment No.")} style={{ ...td, textAlign: "start", fontFamily: "var(--font-mono)" }}>{p.receiptNo}</td>
+              <td data-label={t("Invoice No.")} style={{ ...td, fontFamily: "var(--font-mono)" }}>{p.invoiceNo}</td>
+              <td data-label={t("Bank")} style={td}>{p.bank ? t(p.bank) : "—"}</td>
+              <td data-label={t("Amount")} style={{ ...td, color: "var(--green-600)", fontWeight: 700 }}>{money(p.amount)}</td>
             </tr>
           )),
         )}

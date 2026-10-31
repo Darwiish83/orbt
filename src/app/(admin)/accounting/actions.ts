@@ -56,7 +56,9 @@ export async function saveSheetAction(shipmentId: string, sheet: "origin" | "mgq
   return runAction(
     "accounting",
     async () => {
-      const user = await requireUnlocked();
+      // Shipment cost needs no PIN (owner 2026-10-29); saveCostSheet still checks
+      // Accounting access, the sheet's permission, the country and an open period.
+      const user = await requireUser();
       await saveCostSheet(prisma, user, id.parse(shipmentId), z.enum(["origin", "mgq"]).parse(sheet), z.record(z.string().max(40), z.string().max(60)).parse(values));
     },
     paths,

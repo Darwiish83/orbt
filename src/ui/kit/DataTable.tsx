@@ -57,7 +57,9 @@ export function DataTable<R extends Record<string, unknown>>({
 
   return (
     <div style={{ overflowX: "auto" }}>
-      <table style={{ width: fit ? "auto" : "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      {/* On phones (globals.css .dt-table) every row becomes a card of "LABEL value"
+          lines, so nothing needs sideways scrolling; desktop keeps the table. */}
+      <table className="dt-table" style={{ width: fit ? "auto" : "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
           <tr>
             {cols.map((c) => (
@@ -100,6 +102,7 @@ export function DataTable<R extends Record<string, unknown>>({
                 {cols.map((c) => (
                   <td
                     key={c.key}
+                    data-label={c.label ? t(c.label) : ""}
                     style={{
                       padding: dense ? "9px 12px" : "12px 14px",
                       textAlign: c.align ?? "start",
@@ -116,7 +119,7 @@ export function DataTable<R extends Record<string, unknown>>({
             ))
           ) : (
             <tr>
-              <td colSpan={cols.length} style={{ padding: 32, textAlign: "center", color: "var(--text-muted)" }}>
+              <td colSpan={cols.length} className="dt-empty" style={{ padding: 32, textAlign: "center", color: "var(--text-muted)" }}>
                 {t(empty)}
               </td>
             </tr>

@@ -1,10 +1,11 @@
 "use client";
 
+import { developerWhatsAppLink } from "@/config/developer";
 import { useT } from "@/i18n/I18nProvider";
 
 /**
  * Footer credit (owner request 2026-10-28): the company's copyright line and
- * the developer's signature, "Designed & developed by Darwiish.dev". Quiet by
+ * the developer's signature, "Developed by Darwiish.dev". Quiet by
  * design — small type in the page's muted colour, with the signature as the
  * one accent. Shown on the sign-in page, the customer portal, the public pages
  * and the admin sidebar; never on printed invoices or receipts (those are the
@@ -18,6 +19,14 @@ export function DeveloperCredit({ tone = "light", compact = false }: { tone?: "l
   const muted = tone === "dark" ? "var(--navy-300)" : "var(--text-muted)";
   const strong = tone === "dark" ? "#fff" : "var(--text-strong)";
   const year = new Date().getFullYear();
+  // Opens WhatsApp with a prepared message; the number is fixed in code (src/config/developer.ts).
+  const link = developerWhatsAppLink();
+  // The signature reads left-to-right in Arabic too.
+  const signature = (
+    <bdi dir="ltr" style={{ font: "700 12px var(--font-body)", letterSpacing: ".02em", color: strong }}>
+      Darwiish<span style={{ color: "var(--orange-500)" }}>.dev</span>
+    </bdi>
+  );
 
   return (
     <div
@@ -38,11 +47,21 @@ export function DeveloperCredit({ tone = "light", compact = false }: { tone?: "l
         </div>
       )}
       <div style={{ display: "inline-flex", alignItems: "baseline", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
-        <span>{t("Designed & developed by")}</span>{" "}
-        {/* The signature reads left-to-right in Arabic too. */}
-        <bdi dir="ltr" style={{ font: "700 12px var(--font-body)", letterSpacing: ".02em", color: strong }}>
-          Darwiish<span style={{ color: "var(--orange-500)" }}>.dev</span>
-        </bdi>
+        <span>{t("Developed by")}</span>{" "}
+        {link ? (
+          <a
+            href={link}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="developer-link"
+            title={t("Chat on WhatsApp")}
+            style={{ textDecoration: "none" }}
+          >
+            {signature}
+          </a>
+        ) : (
+          signature
+        )}
       </div>
     </div>
   );

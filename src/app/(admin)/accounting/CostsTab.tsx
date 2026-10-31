@@ -22,6 +22,7 @@ export function CostsTab({ costs, mode, go }: { costs: Costs; mode: "AIR" | "SEA
   const unit = air ? "KG" : "CBM";
   const th = { padding: "8px 10px", font: "700 11px var(--font-body)", textTransform: "uppercase" as const, color: "var(--text-muted)", background: "var(--surface-sunken)", textAlign: "end" as const, whiteSpace: "nowrap" as const };
   const td = { padding: "8px 10px", borderTop: "1px solid var(--border-default)", textAlign: "end" as const, whiteSpace: "nowrap" as const, fontSize: 13 };
+  const heads = ["Shipment", unit, "Origin cost", ...(air ? ["Transit cost"] : []), "Arrived cost (MGQ)", "Total cost", "Paid", "Remaining", "Status", "Profit"];
   return (
     <>
       <Seg
@@ -39,10 +40,11 @@ export function CostsTab({ costs, mode, go }: { costs: Costs; mode: "AIR" | "SEA
       </div>
       <FinBox title="Shipment cost payment" pad={0}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          {/* Phones: each shipment is a card (globals.css .dt-table), no sideways scrolling. */}
+          <table className="dt-table" style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                {["Shipment", unit, "Origin cost", ...(air ? ["Transit cost"] : []), "Arrived cost (MGQ)", "Total cost", "Paid", "Remaining", "Status", "Profit"].map((h, i) => (
+                {heads.map((h, i) => (
                   <th key={h} style={{ ...th, textAlign: i === 0 ? "start" : "end" }}>
                     {t(h)}
                   </th>
@@ -52,7 +54,7 @@ export function CostsTab({ costs, mode, go }: { costs: Costs; mode: "AIR" | "SEA
             <tbody>
               {costs.rows.length === 0 && (
                 <tr>
-                  <td colSpan={10} style={{ ...td, textAlign: "center", color: "var(--text-muted)" }}>
+                  <td colSpan={10} className="dt-empty" style={{ ...td, textAlign: "center", color: "var(--text-muted)" }}>
                     {t("No records found")}
                   </td>
                 </tr>
@@ -61,8 +63,8 @@ export function CostsTab({ costs, mode, go }: { costs: Costs; mode: "AIR" | "SEA
                 const due = Number(r.row.stages.ORIGIN) + Number(r.row.stages.TRANSIT) + Number(r.row.stages.ARRIVED);
                 const paid = Number(r.paid.ORIGIN) + Number(r.paid.TRANSIT) + Number(r.paid.ARRIVED);
                 const st = stageStatus(String(due), String(paid));
-                const cell = (k: "ORIGIN" | "TRANSIT" | "ARRIVED") => (
-                  <td style={td}>
+                const cell = (k: "ORIGIN" | "TRANSIT" | "ARRIVED", label: string) => (
+                  <td style={td} data-label={t(label)}>
                     {money(r.row.stages[k])}
                     <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)" }}>
                       {t("Paid")} {money(r.paid[k])}
@@ -71,21 +73,21 @@ export function CostsTab({ costs, mode, go }: { costs: Costs; mode: "AIR" | "SEA
                 );
                 return (
                   <tr key={r.id} data-testid={`cost-${r.code}`}>
-                    <td style={{ ...td, textAlign: "start", fontFamily: "var(--font-mono)", fontWeight: 700 }}>
+                    <td data-label={t("Shipment")} style={{ ...td, textAlign: "start", fontFamily: "var(--font-mono)", fontWeight: 700 }}>
                       {r.code}
                       <span style={{ display: "block", fontFamily: "var(--font-body)", fontWeight: 400, fontSize: 11, color: "var(--text-muted)" }}>{fdate(r.shipDate)}</span>
                     </td>
-                    <td style={td}>{num(r.row.quantity, air ? 1 : 2)}</td>
-                    {cell("ORIGIN")}
-                    {air && cell("TRANSIT")}
-                    {cell("ARRIVED")}
-                    <td style={{ ...td, fontWeight: 700 }}>{money(due)}</td>
-                    <td style={{ ...td, color: "var(--green-600)" }}>{money(paid)}</td>
-                    <td style={{ ...td, color: due - paid > 0 ? "var(--red-600)" : undefined }}>{money(Math.max(0, due - paid))}</td>
-                    <td style={td}>
+                    <td style={td} data-label={unit}>{num(r.row.quantity, air ? 1 : 2)}</td>
+                    {cell("ORIGIN", "Origin cost")}
+                    {air && cell("TRANSIT", "Transit cost")}
+                    {cell("ARRIVED", "Arrived cost (MGQ)")}
+                    <td style={{ ...td, fontWeight: 700 }} data-label={t("Total cost")}>{money(due)}</td>
+                    <td style={{ ...td, color: "var(--green-600)" }} data-label={t("Paid")}>{money(paid)}</td>
+                    <td style={{ ...td, color: due - paid > 0 ? "var(--red-600)" : undefined }} data-label={t("Remaining")}>{money(Math.max(0, due - paid))}</td>
+                    <td style={td} data-label={t("Status")}>
                       <Badge tone={st === "Paid" ? "success" : st === "Partial" ? "warning" : st === "Unpaid" ? "danger" : "neutral"}>{t(st)}</Badge>
                     </td>
-                    <td style={{ ...td, fontWeight: 700, color: Number(r.row.profit) >= 0 ? "var(--green-600)" : "var(--red-600)" }}>{money(r.row.profit)}</td>
+                    <td style={{ ...td, fontWeight: 700, color: Number(r.row.profit) >= 0 ? "var(--green-600)" : "var(--red-600)" }} data-label={t("Profit")}>{money(r.row.profit)}</td>
                   </tr>
                 );
               })}
