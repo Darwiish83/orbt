@@ -1,8 +1,9 @@
 "use server";
 
-import { headers } from "next/headers";
 import { prisma } from "@/db/client";
+import { passwordResetUrl } from "@/lib/appUrl";
 import { emailLayout, sendEmail } from "@/lib/email";
+import { captureError } from "@/lib/logger";
 import { createResetToken } from "@/modules/auth/reset";
 import { assertNotRateLimited, recordAttempt } from "@/modules/auth/rateLimit";
 
@@ -23,10 +24,16 @@ export async function requestPasswordResetAction(_prev: ForgotState, formData: F
   await recordAttempt(prisma, { identifier: email, kind: "reset", success: !!token });
 
   if (token) {
-    const h = await headers();
-    const host = h.get("x-forwarded-host") || h.get("host");
-    const proto = h.get("x-forwarded-proto") || "http";
-    const url = `${proto}://${host}/reset-password?token=${encodeURIComponent(token)}`;
+    // The link's origin comes from APP_URL only, never from Host / X-Forwarded-Host
+    // (security finding H1: a forged header would send a genuine email whose
+    // link, with a valid token, points at someone else's site).
+    let url: string;
+    try {
+      url = passwordResetUrl(token);
+    } catch (e) {
+      captureError(e, { area: "password-reset" });
+      return { done: true };
+    }
     await sendEmail({
       to: email,
       subject: "Reset your OrbitCargo password",
