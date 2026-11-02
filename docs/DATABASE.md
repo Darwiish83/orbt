@@ -6,17 +6,31 @@ Postgres**, isolated from any other Postgres on the machine.
 ## Local database (Docker)
 
 A dedicated container runs on **port 5433** (host 5432 is used by an unrelated
-project and is left untouched):
+project and is left untouched). It listens on **loopback only** (`127.0.0.1`
+and `::1`), so no other machine on the network can reach it (security finding
+H2). Keep both bindings: `localhost` resolves to `::1` first on Windows, and
+without the IPv6 one every new Prisma connection stalls.
 
 ```bash
+# Admin password: random, never written in docs or typed on the command line.
+export POSTGRES_PASSWORD="$(openssl rand -hex 16)"   # put it in .env → DATABASE_ADMIN_URL
 docker run -d --name orbitcargo-postgres \
   -e POSTGRES_USER=orbit_app \
-  -e POSTGRES_PASSWORD=orbit_dev_pw \
+  -e POSTGRES_PASSWORD \
   -e POSTGRES_DB=orbitcargo \
-  -p 5433:5432 \
+  -p 127.0.0.1:5433:5432 \
+  -p "[::1]:5433:5432" \
   -v orbitcargo_pgdata:/var/lib/postgresql/data \
   postgres:16-alpine
+unset POSTGRES_PASSWORD
 ```
+
+`POSTGRES_PASSWORD` is only read when the volume is first created. To change
+the admin password later, run `ALTER ROLE orbit_app PASSWORD '…'` through
+`docker exec -i orbitcargo-postgres psql -U orbit_app -d postgres` (SQL on
+stdin; the local socket needs no password) and update `DATABASE_ADMIN_URL` in
+`.env`. Never publish the port as `-p 5433:5432` — that opens it on every
+network interface.
 
 Two databases are used:
 - `orbitcargo` — development (`.env` → `DATABASE_URL`)
