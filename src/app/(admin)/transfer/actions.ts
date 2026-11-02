@@ -29,7 +29,9 @@ const send = z.object({
 export type SendValues = z.input<typeof send>;
 const paths = ["/transfer", "/accounting"];
 
-export async function saveReceiveAction(rowId: string | null, values: ReceiveValues) {
+/** A new Money Receive needs the form's UUID `idempotencyKey`: a resubmission
+ * returns the row already saved instead of a second one (security finding H3). */
+export async function saveReceiveAction(rowId: string | null, values: ReceiveValues, idempotencyKey?: string) {
   return runAction(
     "transfer",
     async () => {
@@ -38,7 +40,7 @@ export async function saveReceiveAction(rowId: string | null, values: ReceiveVal
       const v = receive.parse(values);
       const input = { ...v, year: scope?.year ?? Number(v.receivedAt.slice(0, 4)) };
       if (rowId) await editReceive(prisma, user, id.parse(rowId), input);
-      else await addReceive(prisma, user, input);
+      else await addReceive(prisma, user, { ...input, idempotencyKey: z.string().uuid().parse(idempotencyKey) });
     },
     paths,
   );

@@ -46,6 +46,8 @@ function Inner({ data }: { data: NonNullable<Data> }) {
   const { report: R, country, year, kind } = data;
   const A = R.access;
   const [form, setForm] = useState<(ReceiveValues & { id?: string }) | null>(null);
+  // One key per opened "Add Money Receive" form: a double click returns the same row (H3).
+  const [receiveKey, setReceiveKey] = useState("");
   const [send, setSend] = useState<(SendValues & { id: string; feePct: string; fee: string }) | null>(null);
   const [del, setDel] = useState<{ row: ReportRow; part: "receive" | "send" } | null>(null);
   const [rcpt, setRcpt] = useState<ReportRow | null>(null);
@@ -128,7 +130,7 @@ function Inner({ data }: { data: NonNullable<Data> }) {
           <Button
             leadingIcon={<Icon name="Plus" size={16} />}
             data-testid="add-receive"
-            onClick={() => setForm({ country, kind, receivedAt: mk(R.month) === today().slice(0, 7) ? today() : `${mk(R.month)}-01`, amount: "", feePct: "", currency: "USD", description: "", tag: "OTHER" })}
+            onClick={() => { setReceiveKey(crypto.randomUUID()); setForm({ country, kind, receivedAt: mk(R.month) === today().slice(0, 7) ? today() : `${mk(R.month)}-01`, amount: "", feePct: "", currency: "USD", description: "", tag: "OTHER" }); }}
           >
             {t("Add Money Receive")}
           </Button>
@@ -265,7 +267,7 @@ function Inner({ data }: { data: NonNullable<Data> }) {
           v={form}
           customer={kind === "CUSTOMER"}
           onClose={() => setForm(null)}
-          onSave={(v) => act(saveReceiveAction(form.id ?? null, v), "Saved", v.description.toUpperCase(), () => setForm(null))}
+          onSave={(v) => act(saveReceiveAction(form.id ?? null, v, form.id ? undefined : receiveKey), "Saved", v.description.toUpperCase(), () => setForm(null))}
         />
       )}
       {rcpt && (

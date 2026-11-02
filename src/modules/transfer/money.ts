@@ -3,6 +3,7 @@ import { assertYearOpen } from "@/modules/accounting/periods";
 import { AuthorizationError, ValidationError } from "@/lib/errors";
 import { logAudit } from "@/modules/audit/log";
 import { can, requirePermission, type AuthzUser } from "@/modules/authz/core";
+import { oncePerKey } from "@/modules/finance/idempotency";
 import { dec, round2, sum } from "@/modules/finance/money";
 
 /**
@@ -130,6 +131,8 @@ export interface ReceiveInput {
   currency: string;
   description: string;
   tag?: TransferTag | null;
+  /** UUID made when the form opened: a resubmission returns the row already saved (H3). */
+  idempotencyKey?: string;
 }
 
 function checkReceive(input: ReceiveInput) {
@@ -151,11 +154,31 @@ export async function addReceive(db: PrismaClient, actor: AuthzUser, input: Rece
   await inCountry(db, actor, input.country);
   await assertYearOpen(db, input.country, input.year);
   const v = checkReceive(input);
-  const row = await db.moneyTransferRow.create({
-    data: { country: input.country, year: input.year, month: v.month, kind: input.kind, receivedAt: v.date, amount: v.amount, feePct: v.feePct, currency: input.currency, description: v.description, tag: v.tag, receiverUserId: actor.id },
-  });
-  await logAudit(db, { actorUserId: actor.id, action: "transfer.receive", entityType: "MoneyTransferRow", entityId: row.id, metadata: { amount: v.amount.toString(), currency: input.currency } });
-  return row;
+  const findRow = async (key: string) => {
+    const r = await db.moneyTransferRow.findUnique({ where: { idempotencyKey: key } });
+    return r && { owner: r.receiverUserId, result: r };
+  };
+  return oncePerKey(input.idempotencyKey, actor.id, findRow, () =>
+    db.$transaction(async (tx) => {
+      const row = await tx.moneyTransferRow.create({
+        data: { country: input.country, year: input.year, month: v.month, kind: input.kind, receivedAt: v.date, amount: v.amount, feePct: v.feePct, currency: input.currency, description: v.description, tag: v.tag, receiverUserId: actor.id, idempotencyKey: input.idempotencyKey ?? null },
+      });
+      await logAudit(tx, { actorUserId: actor.id, action: "transfer.receive", entityType: "MoneyTransferRow", entityId: row.id, metadata: { amount: v.amount.toString(), currency: input.currency } });
+      return row;
+    }),
+  );
+}
+
+/**
+ * Lock the row for this transaction, then load and check it (H3). Every change
+ * to a row's receive / hand-over / send state goes through here, so a check
+ * such as "the Sender already recorded this transfer" and the change it guards
+ * happen together: two people acting at the same moment are served one after
+ * the other, each seeing the other's result.
+ */
+async function lockRow(tx: Prisma.TransactionClient, actor: AuthzUser, id: string) {
+  await tx.$queryRaw`SELECT id FROM "MoneyTransferRow" WHERE id = ${id} FOR UPDATE`;
+  return loadRow(tx as unknown as PrismaClient, actor, id);
 }
 
 async function loadRow(db: PrismaClient, actor: AuthzUser, id: string) {
@@ -170,52 +193,63 @@ async function loadRow(db: PrismaClient, actor: AuthzUser, id: string) {
 /** Receiver: edit the left side (click the name). Locked once the Sender recorded it. */
 export async function editReceive(db: PrismaClient, actor: AuthzUser, id: string, input: ReceiveInput) {
   requirePermission(actor, "transfer:receive");
-  const row = await loadRow(db, actor, id);
-  if (row.sentAmount) throw new ValidationError("The Sender already recorded this transfer");
-  const v = checkReceive({ ...input, country: row.country, year: row.year, kind: row.kind });
-  await db.moneyTransferRow.update({ where: { id }, data: { receivedAt: v.date, month: v.month, amount: v.amount, feePct: v.feePct, currency: input.currency, description: v.description, tag: v.tag } });
-  await logAudit(db, { actorUserId: actor.id, action: "transfer.receive_edit", entityType: "MoneyTransferRow", entityId: id });
+  await db.$transaction(async (tx) => {
+    const row = await lockRow(tx, actor, id);
+    if (row.sentAmount) throw new ValidationError("The Sender already recorded this transfer");
+    const v = checkReceive({ ...input, country: row.country, year: row.year, kind: row.kind });
+    await tx.moneyTransferRow.update({ where: { id }, data: { receivedAt: v.date, month: v.month, amount: v.amount, feePct: v.feePct, currency: input.currency, description: v.description, tag: v.tag } });
+    await logAudit(tx, { actorUserId: actor.id, action: "transfer.receive_edit", entityType: "MoneyTransferRow", entityId: id });
+  });
 }
 
 /** Receiver only: orange (received) ↔ green (handed to the Sender). */
 export async function setHanded(db: PrismaClient, actor: AuthzUser, id: string, handed: boolean) {
   requirePermission(actor, "transfer:receive");
-  const row = await loadRow(db, actor, id);
-  if (!handed && row.sentAmount) throw new ValidationError("The Sender already recorded this transfer");
-  await db.moneyTransferRow.update({ where: { id }, data: { handedAt: handed ? (row.handedAt ?? new Date()) : null } });
-  await logAudit(db, { actorUserId: actor.id, action: handed ? "transfer.handed" : "transfer.unhanded", entityType: "MoneyTransferRow", entityId: id });
+  await db.$transaction(async (tx) => {
+    const row = await lockRow(tx, actor, id);
+    if (!handed && row.sentAmount) throw new ValidationError("The Sender already recorded this transfer");
+    await tx.moneyTransferRow.update({ where: { id }, data: { handedAt: handed ? (row.handedAt ?? new Date()) : null } });
+    await logAudit(tx, { actorUserId: actor.id, action: handed ? "transfer.handed" : "transfer.unhanded", entityType: "MoneyTransferRow", entityId: id });
+  });
 }
 
 /** Sender: record that the money reached its owner (only on a green row). */
 export async function recordSend(db: PrismaClient, actor: AuthzUser, id: string, input: { sentAt: string; amount: string; currency: string; status: TransferSendStatus }) {
   requirePermission(actor, "transfer:send");
-  const row = await loadRow(db, actor, id);
-  if (!row.handedAt) throw new ValidationError("The Receiver has not handed this money over yet");
   const amount = money(input.amount, "amount");
   if (!CURRENCIES.includes(input.currency as (typeof CURRENCIES)[number])) throw new ValidationError("Choose the currency");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.sentAt)) throw new ValidationError("Enter a valid date");
   if (!["PAID", "PENDING"].includes(input.status)) throw new ValidationError("Choose the status");
-  await db.moneyTransferRow.update({ where: { id }, data: { sentAt: new Date(`${input.sentAt}T00:00:00Z`), sentAmount: amount, sentCurrency: input.currency, sentStatus: input.status, senderUserId: actor.id } });
-  await logAudit(db, { actorUserId: actor.id, action: "transfer.send", entityType: "MoneyTransferRow", entityId: id, metadata: { amount: amount.toString(), status: input.status } });
+  await db.$transaction(async (tx) => {
+    const row = await lockRow(tx, actor, id);
+    if (!row.handedAt) throw new ValidationError("The Receiver has not handed this money over yet");
+    await tx.moneyTransferRow.update({ where: { id }, data: { sentAt: new Date(`${input.sentAt}T00:00:00Z`), sentAmount: amount, sentCurrency: input.currency, sentStatus: input.status, senderUserId: actor.id } });
+    await logAudit(tx, { actorUserId: actor.id, action: "transfer.send", entityType: "MoneyTransferRow", entityId: id, metadata: { amount: amount.toString(), status: input.status } });
+  });
 }
 
 /** Delete the Sender side only (Money Receive stays). */
 export async function deleteSend(db: PrismaClient, actor: AuthzUser, id: string) {
   requirePermission(actor, "transfer:send");
-  await loadRow(db, actor, id);
-  await db.moneyTransferRow.update({ where: { id }, data: { sentAt: null, sentAmount: null, sentCurrency: null, sentStatus: null, senderUserId: null } });
-  await logAudit(db, { actorUserId: actor.id, action: "transfer.send_delete", entityType: "MoneyTransferRow", entityId: id });
+  await db.$transaction(async (tx) => {
+    await lockRow(tx, actor, id);
+    await tx.moneyTransferRow.update({ where: { id }, data: { sentAt: null, sentAmount: null, sentCurrency: null, sentStatus: null, senderUserId: null } });
+    await logAudit(tx, { actorUserId: actor.id, action: "transfer.send_delete", entityType: "MoneyTransferRow", entityId: id });
+  });
 }
 
 /** Delete a Money Receive row (soft). A row the Sender already recorded must
  * have its transfer side removed first. */
 export async function deleteReceive(db: PrismaClient, actor: AuthzUser, id: string) {
   requirePermission(actor, "transfer:receive");
-  const row = await loadRow(db, actor, id);
-  if (row.sentAmount) throw new ValidationError("Delete the transfer side first");
-  if (await db.transferReceipt.count({ where: { transferRowId: id, voidedAt: null } })) throw new ValidationError("Void its receipt first");
-  await db.moneyTransferRow.update({ where: { id }, data: { deletedAt: new Date() } });
-  await logAudit(db, { actorUserId: actor.id, action: "transfer.receive_delete", entityType: "MoneyTransferRow", entityId: id });
+  await db.$transaction(async (tx) => {
+    const row = await lockRow(tx, actor, id);
+    if (row.sentAmount) throw new ValidationError("Delete the transfer side first");
+    // createTransferReceipt locks the same row, so a receipt can't appear in between.
+    if (await tx.transferReceipt.count({ where: { transferRowId: id, voidedAt: null } })) throw new ValidationError("Void its receipt first");
+    await tx.moneyTransferRow.update({ where: { id }, data: { deletedAt: new Date() } });
+    await logAudit(tx, { actorUserId: actor.id, action: "transfer.receive_delete", entityType: "MoneyTransferRow", entityId: id });
+  });
 }
 
 /** Start new month (Receiver or super admin): opens the next month after the last one. */

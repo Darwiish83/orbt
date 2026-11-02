@@ -83,13 +83,15 @@ const outForm = z.object({
 });
 export type OutFormValues = z.input<typeof outForm>;
 
-export async function addOutAction(values: OutFormValues) {
+/** `idempotencyKey`: a UUID the form makes when it opens; a resubmission returns
+ * the out already saved instead of a second one (security finding H3). */
+export async function addOutAction(values: OutFormValues, idempotencyKey: string) {
   return runAction(
     "accounting",
     async () => {
       const user = await requireUnlocked();
       const scope = await getAdminScope(user);
-      const v = outForm.parse(values);
+      const v = { ...outForm.parse(values), idempotencyKey: z.string().uuid().parse(idempotencyKey) };
       // Every out says who it went to and how (owner 2026-10-25).
       if (!v.sentTo) throw new ValidationError(v.category === "DEBT" ? "Enter who took the money" : "Enter who it was sent to");
       if (!v.sentVia) throw new ValidationError("Choose how it was sent");
@@ -110,12 +112,12 @@ export async function reverseOutAction(outId: string) {
   );
 }
 
-export async function returnDebtAction(debtId: string, value: string, bankId: string, date: string) {
+export async function returnDebtAction(debtId: string, value: string, bankId: string, date: string, idempotencyKey: string) {
   return runAction(
     "accounting",
     async () => {
       const user = await requireUnlocked();
-      return returnDebt(prisma, user, { debtId: id.parse(debtId), amount: amount.parse(value), bankId: id.parse(bankId), returnedAt: day.parse(date) });
+      return returnDebt(prisma, user, { debtId: id.parse(debtId), amount: amount.parse(value), bankId: id.parse(bankId), returnedAt: day.parse(date), idempotencyKey: z.string().uuid().parse(idempotencyKey) });
     },
     paths,
   );

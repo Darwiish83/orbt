@@ -5,6 +5,7 @@ import { displayShipmentCode } from "@/modules/authz/adminScope";
 import { requirePermission, requireScope, type AuthzUser } from "@/modules/authz/core";
 import { lineMeasure } from "@/modules/finance/charges";
 import { dec, round2, sum } from "@/modules/finance/money";
+import { oncePerKey } from "@/modules/finance/idempotency";
 import { issueReceipt } from "@/modules/finance/receipts";
 import {
   airMgqSchema,
@@ -427,6 +428,8 @@ export interface AddOutInput {
   forYear?: number;
   /** For an earlier year: the shipment or agent when it is not in the system (e.g. "W-30"). */
   reference?: string;
+  /** UUID made when the form opened: a resubmission returns the out already saved (H3). */
+  idempotencyKey?: string;
 }
 
 /** Outs that can be paid for an earlier year (they come out of its Orbit profit). */
@@ -465,7 +468,7 @@ export async function addOut(db: PrismaClient, actor: AuthzUser, scope: Scope, i
     if (!EARLIER_OUT.includes(input.category)) throw new ValidationError("This kind of out cannot belong to an earlier year");
     const hasYear = await db.openingEntry.findFirst({ where: { country: scope.country, year: scope.year, fromYear: forYear, kind: "TOTAL", carried: false, reversedAt: null } });
     if (!hasYear) throw new ValidationError("That year has no opening balance");
-    if (amount.greaterThan(await earlierYearLeft(db, scope, forYear))) throw new ValidationError("More than what is left from that year");
+    // What that year has left is re-checked inside the locked transaction below (H3).
   }
 
   if (input.category === "SHIPMENT_COST") {
@@ -481,12 +484,7 @@ export async function addOut(db: PrismaClient, actor: AuthzUser, scope: Scope, i
     }
   }
   if (input.category === "DEBT" && !sentTo) throw new ValidationError("Enter who took the money");
-  if (input.category === "PROFIT_PAYOUT" && forYear === null) {
-    if (!input.partner) throw new ValidationError("Choose the partner");
-    const io = await incomeAndOut(db, actor, scope);
-    const row = io.composition.find((r) => r.key === (input.partner === "MAHAD" ? "mah" : "som"));
-    if (!row || amount.greaterThan(dec(row.remaining))) throw new ValidationError("The payout is more than what we hold for this partner");
-  }
+  if (input.category === "PROFIT_PAYOUT" && forYear === null && !input.partner) throw new ValidationError("Choose the partner");
   // An earlier year's commission is paid as one amount (its invoices are not in this year).
   const allocations = input.category === "COMMISSION" && forYear === null ? input.commissions ?? [] : [];
   if (input.category === "COMMISSION" && forYear === null) {
@@ -494,7 +492,21 @@ export async function addOut(db: PrismaClient, actor: AuthzUser, scope: Scope, i
     if (!sum(allocations.map((a) => round2(dec(a.amount)))).equals(amount)) throw new ValidationError("The amounts must add up to the total");
   }
 
-  return db.$transaction(async (tx) => {
+  const findOut = async (key: string) => {
+    const o = await db.cashOut.findUnique({ where: { idempotencyKey: key }, include: { receipt: true } });
+    return o && { owner: o.actorUserId, result: { id: o.id, receiptNo: o.receipt.number } };
+  };
+  return oncePerKey(input.idempotencyKey, actor.id, findOut, () => db.$transaction(async (tx) => {
+    // One out at a time per country and year (H3): the balances below are read
+    // and checked inside this lock, so two outs at the same moment can't both
+    // pass a check that only one of them should.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`money-out:${scope.country}:${scope.year}`}))`;
+    if (forYear !== null && amount.greaterThan(await earlierYearLeft(tx, scope, forYear))) throw new ValidationError("More than what is left from that year");
+    if (input.category === "PROFIT_PAYOUT" && forYear === null) {
+      const io = await incomeAndOut(tx as unknown as PrismaClient, actor, scope);
+      const row = io.composition.find((r) => r.key === (input.partner === "MAHAD" ? "mah" : "som"));
+      if (!row || amount.greaterThan(dec(row.remaining))) throw new ValidationError("The payout is more than what we hold for this partner");
+    }
     for (const a of allocations) {
       await tx.$queryRaw`SELECT id FROM "Invoice" WHERE id = ${a.invoiceId} FOR UPDATE`;
       const inv = await tx.invoice.findUnique({ where: { id: a.invoiceId }, include: { shipment: true, commissionPayments: { include: { cashOut: true } } } });
@@ -533,12 +545,13 @@ export async function addOut(db: PrismaClient, actor: AuthzUser, scope: Scope, i
         note: input.note?.trim().slice(0, 300) || null,
         receiptId: receipt.id,
         actorUserId: actor.id,
+        idempotencyKey: input.idempotencyKey ?? null,
       },
     });
     if (allocations.length) await tx.commissionPayment.createMany({ data: allocations.map((a) => ({ cashOutId: out.id, invoiceId: a.invoiceId, amount: round2(dec(a.amount)) })) });
     await logAudit(tx, { actorUserId: actor.id, action: "accounting.out", entityType: "CashOut", entityId: out.id, metadata: { category: input.category, amount: amount.toString(), receipt: receipt.number, forYear, reference } });
     return { id: out.id, receiptNo: receipt.number };
-  });
+  }));
 }
 
 /** Correct an out: it is reversed (kept with its receipt), never deleted. */
@@ -596,12 +609,16 @@ export async function listDebts(db: PrismaClient, actor: AuthzUser, scope: Scope
 }
 
 /** Money returned on a debt: posts to Income with an IN receipt. */
-export async function returnDebt(db: PrismaClient, actor: AuthzUser, input: { debtId: string; amount: string; bankId: string; returnedAt: Date }) {
+export async function returnDebt(db: PrismaClient, actor: AuthzUser, input: { debtId: string; amount: string; bankId: string; returnedAt: Date; idempotencyKey?: string }) {
   requireAccountingAccess(actor);
   requirePermission(actor, "accounting:write");
   const amount = round2(dec(input.amount));
   if (!amount.greaterThan(0)) throw new ValidationError("Enter the amount");
-  return db.$transaction(async (tx) => {
+  const findReturn = async (key: string) => {
+    const r = await db.debtReturn.findUnique({ where: { idempotencyKey: key }, include: { receipt: true } });
+    return r && { owner: r.actorUserId, result: { id: r.id, receiptNo: r.receipt.number } };
+  };
+  return oncePerKey(input.idempotencyKey, actor.id, findReturn, () => db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "CashOut" WHERE id = ${input.debtId} FOR UPDATE`;
     await tx.$queryRaw`SELECT id FROM "OpeningEntry" WHERE id = ${input.debtId} FOR UPDATE`;
     const out = await tx.cashOut.findUnique({ where: { id: input.debtId }, include: { returns: true } });
@@ -621,10 +638,10 @@ export async function returnDebt(db: PrismaClient, actor: AuthzUser, input: { de
     const bank = await tx.bank.findUnique({ where: { id: input.bankId } });
     if (!bank?.active) throw new ValidationError("Choose a bank");
     const receipt = await issueReceipt(tx, { direction: "IN", kind: "DEBT_RETURN", amount, bankId: bank.id, counterparty: debt.person, actorUserId: actor.id, issuedAt: input.returnedAt });
-    const r = await tx.debtReturn.create({ data: { ...debt.link, amount, bankId: bank.id, returnedAt: input.returnedAt, receiptId: receipt.id, actorUserId: actor.id } });
+    const r = await tx.debtReturn.create({ data: { ...debt.link, amount, bankId: bank.id, returnedAt: input.returnedAt, receiptId: receipt.id, actorUserId: actor.id, idempotencyKey: input.idempotencyKey ?? null } });
     await logAudit(tx, { actorUserId: actor.id, action: "accounting.debt_return", entityType: debt.entity, entityId: input.debtId, metadata: { amount: amount.toString() } });
     return { id: r.id, receiptNo: receipt.number };
-  });
+  }));
 }
 
 // ------------------------------------------------------------------ commissions, partners, profit

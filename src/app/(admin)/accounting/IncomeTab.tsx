@@ -441,6 +441,8 @@ export function OutDialog({ options, onClose, onDone, preset }: { options: OutOp
     ...preset,
   } as OutFormValues);
   const [com, setCom] = useState<Record<string, string>>({});
+  // One key per opened form: a double click or resend returns the same out (H3).
+  const [requestKey] = useState(() => crypto.randomUUID());
   const set = (k: keyof OutFormValues, x: unknown) => setV((o) => ({ ...o, [k]: x }));
   const sh = options.shipments.find((s) => s.id === v.shipmentId);
   const comTotal = useMemo(() => Object.values(com).reduce((a, x) => a + Math.round((Number(x) || 0) * 100), 0) / 100, [com]);
@@ -456,7 +458,7 @@ export function OutDialog({ options, onClose, onDone, preset }: { options: OutOp
         paidAt: String(v.paidAt),
         commissions: v.category === "COMMISSION" ? Object.entries(com).filter(([, x]) => Number(x) > 0).map(([invoiceId, x]) => ({ invoiceId, amount: Number(x).toFixed(2) })) : undefined,
       } as OutFormValues;
-      const r = await addOutAction(values);
+      const r = await addOutAction(values, requestKey);
       if (!r.ok) return setError(r.error);
       toast({ tone: "success", title: "Out saved", message: r.data?.receiptNo });
       onDone();

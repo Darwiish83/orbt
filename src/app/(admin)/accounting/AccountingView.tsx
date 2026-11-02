@@ -141,6 +141,8 @@ function DebtsTab({ debts, options, canWrite }: { debts: A<typeof listDebts>; op
   const toast = useToast();
   const router = useRouter();
   const [ret, setRet] = useState<A<typeof listDebts>["rows"][number] | null>(null);
+  // One key per opened "Money returned" form: a double click returns the same return (H3).
+  const [retKey, setRetKey] = useState("");
   const [lend, setLend] = useState(false);
   const [v, setV] = useState({ amount: "", bankId: options.banks[0]?.id ?? "", date: new Date().toISOString().slice(0, 10) });
   const [pending, start] = useTransition();
@@ -167,7 +169,7 @@ function DebtsTab({ debts, options, canWrite }: { debts: A<typeof listDebts>; op
       align: "right",
       render: (r) =>
         canWrite && Number(r.owed) > 0 ? (
-          <Button size="s" variant="outline" onClick={() => { setRet(r); setV((o) => ({ ...o, amount: r.owed })); }}>
+          <Button size="s" variant="outline" onClick={() => { setRet(r); setRetKey(crypto.randomUUID()); setV((o) => ({ ...o, amount: r.owed })); }}>
             {t("Money returned")}
           </Button>
         ) : null,
@@ -208,7 +210,7 @@ function DebtsTab({ debts, options, canWrite }: { debts: A<typeof listDebts>; op
                 disabled={pending}
                 onClick={() =>
                   start(async () => {
-                    const r = await returnDebtAction(ret.id, v.amount, v.bankId, v.date);
+                    const r = await returnDebtAction(ret.id, v.amount, v.bankId, v.date, retKey);
                     if (!r.ok) return toast({ tone: "danger", title: r.error });
                     toast({ tone: "success", title: "Saved", message: r.data?.receiptNo });
                     setRet(null);

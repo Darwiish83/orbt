@@ -980,6 +980,9 @@ model CashOut {
   receiptId   String      @unique
   receipt     Receipt     @relation(fields: [receiptId], references: [id], onDelete: Restrict)
   actorUserId String?
+  // One record per form submission (security finding H3): a replay or a double
+  // click with the same key returns the record already saved, never a second one.
+  idempotencyKey String? @unique
   reversedAt  DateTime?
   createdAt   DateTime    @default(now())
 
@@ -1017,6 +1020,9 @@ model DebtReturn {
   receiptId      String        @unique
   receipt        Receipt       @relation(fields: [receiptId], references: [id], onDelete: Restrict)
   actorUserId    String?
+  // One record per form submission (security finding H3): a replay or a double
+  // click with the same key returns the record already saved, never a second one.
+  idempotencyKey String? @unique
   createdAt      DateTime      @default(now())
 
   @@index([cashOutId])
@@ -1149,6 +1155,9 @@ model MoneyTransferRow {
   description    String
   tag            TransferTag?
   receiverUserId String?
+  // One record per form submission (security finding H3): a replay or a double
+  // click with the same key returns the record already saved, never a second one.
+  idempotencyKey String? @unique
   handedAt       DateTime?
   sentAt         DateTime?           @db.Date
   sentAmount     Decimal?            @db.Decimal(14, 2) // taken from the customer
