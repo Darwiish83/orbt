@@ -1,6 +1,7 @@
 "use server";
 
 import { AuthError } from "next-auth";
+import { headers } from "next/headers";
 import { signIn, signOut } from "@/auth";
 import { prisma } from "@/db/client";
 import { RateLimitError, ValidationError } from "@/lib/errors";
@@ -14,6 +15,7 @@ import {
   verifyCustomerSignup,
   verifyStaffSetup,
 } from "@/modules/auth/flows";
+import { clientIp } from "@/modules/auth/loginGuard";
 
 /**
  * One sign-in page for staff and customers (ADR-016, ADR-021). The ID decides
@@ -35,6 +37,8 @@ function fail(e: unknown): { ok: false; error: string } {
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? "");
 const isStaffId = (id: string) => /^\s*EMP-/i.test(id);
+/** The caller's address from our trusted proxy only (null without one). */
+const requestIp = async () => clientIp(await headers());
 
 export async function loginAction(_prev: ActionResult | null, f: FormData): Promise<ActionResult> {
   const id = str(f, "id");
@@ -61,8 +65,9 @@ export async function loginAction(_prev: ActionResult | null, f: FormData): Prom
 /** First login / forgot password, step 1: always "sent" unless the input is malformed or rate-limited. */
 export async function requestAccessAction(input: { id: string; phone: string; email: string }): Promise<ActionResult> {
   try {
-    if (isStaffId(input.id)) await requestStaffSetup(prisma, { employeeId: input.id, email: input.email }, sendOtpEmail);
-    else await requestCustomerAccess(prisma, { reference: input.id, phone: input.phone, email: input.email }, sendOtpEmail);
+    const ip = await requestIp();
+    if (isStaffId(input.id)) await requestStaffSetup(prisma, { employeeId: input.id, email: input.email }, sendOtpEmail, ip);
+    else await requestCustomerAccess(prisma, { reference: input.id, phone: input.phone, email: input.email }, sendOtpEmail, ip);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -87,7 +92,7 @@ export async function startSignupAction(input: {
   cargoCategory: string;
 }): Promise<ActionResult> {
   try {
-    await startCustomerSignup(prisma, input, sendOtpEmail);
+    await startCustomerSignup(prisma, input, sendOtpEmail, await requestIp());
     return { ok: true };
   } catch (e) {
     return fail(e);

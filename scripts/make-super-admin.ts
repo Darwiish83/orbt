@@ -15,6 +15,7 @@
  */
 import { PrismaClient } from "@prisma/client";
 import { logAudit } from "../src/modules/audit/log";
+import { passwordResetUrl } from "../src/lib/appUrl";
 import { createSetPasswordToken } from "../src/modules/auth/reset";
 import { ensureEmployeeForUser } from "../src/modules/users/employeeCode";
 
@@ -65,8 +66,9 @@ async function main() {
 
   if (wantLink) {
     const token = await createSetPasswordToken(prisma, user.id, 15 * 60 * 1000);
-    const base = process.env.APP_URL || "http://localhost:3500";
-    console.log(`\nOne-time set-password link (15 minutes, single use — don't share):\n${base}/reset-password?token=${encodeURIComponent(token)}\n`);
+    // Built on the trusted APP_URL only: HTTPS in production, no credentials (H1).
+    const link = passwordResetUrl(token, process.env.APP_URL || "http://localhost:3500");
+    console.log(`\nOne-time set-password link (15 minutes, single use — don't share):\n${link}\n`);
   } else {
     console.log("Next: /login → \"First login or forgot password?\" → Employee ID + email → code → new password.");
   }

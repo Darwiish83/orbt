@@ -34,10 +34,10 @@ export default async function ResetPasswordPage({
         ) : (
           <>
             <p style={{ fontSize: 14, color: "var(--text-muted)", margin: "0 0 20px" }}>
-              This link is missing its token. Request a new reset email.
+              This link is missing its token. On the sign-in page, choose &quot;First login or forgot password?&quot; to get a code by email.
             </p>
-            <Link href="/forgot-password" style={{ color: "var(--navy-700)", fontWeight: 600 }}>
-              Request a reset link
+            <Link href="/login" style={{ color: "var(--navy-700)", fontWeight: 600 }}>
+              Go to sign in
             </Link>
           </>
         )}

@@ -70,10 +70,13 @@ describe("login hardening without a second factor (ADR-028)", () => {
     ]);
   });
 
-  it("reads the client IP from proxy headers, first hop only", () => {
-    expect(clientIp(new Headers({ "x-forwarded-for": "203.0.113.9, 10.0.0.1" }))).toBe("203.0.113.9");
-    expect(clientIp(new Headers({ "x-real-ip": "198.51.100.4" }))).toBe("198.51.100.4");
-    expect(clientIp(new Headers())).toBeNull();
-    expect(clientIp(undefined)).toBeNull();
+  it("reads the client IP only from our trusted proxy's entry (rightmost), never a client-supplied one", () => {
+    // Behind one proxy: the client's own X-Forwarded-For value can only add entries on the left.
+    expect(clientIp(new Headers({ "x-forwarded-for": "203.0.113.9, 10.0.0.1" }), 1)).toBe("10.0.0.1");
+    expect(clientIp(new Headers({ "x-real-ip": "198.51.100.4" }), 1)).toBeNull();
+    // No trusted proxy configured: nothing a client sends is believed.
+    expect(clientIp(new Headers({ "x-forwarded-for": "203.0.113.9" }), 0)).toBeNull();
+    expect(clientIp(new Headers(), 1)).toBeNull();
+    expect(clientIp(undefined, 1)).toBeNull();
   });
 });

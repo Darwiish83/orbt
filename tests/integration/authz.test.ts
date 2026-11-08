@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { hashPassword, verifyPassword } from "@/modules/auth/password";
 import { verifyCredentials, setPassword, assignRole, invalidateSessions } from "@/modules/auth/accounts";
-import { createResetToken, consumeResetToken } from "@/modules/auth/reset";
+import { createSetPasswordToken, consumeResetToken } from "@/modules/auth/reset";
 import { assertNotRateLimited, recordAttempt } from "@/modules/auth/rateLimit";
 import {
   assertCustomerAccess,
@@ -162,31 +162,43 @@ describe("credentials & session invalidation", () => {
 
 // --- password reset tokens ---------------------------------------------------
 
-describe("password reset tokens", () => {
+describe("set-password tokens", () => {
   it("is single-use and actually changes the password", async () => {
     const u = await makeUser({ email: "reset@orbit.so" });
     await setPassword(prisma, u.id, "oldpassword");
-    const token = await createResetToken(prisma, "reset@orbit.so");
-    expect(token).toBeTruthy();
+    const token = await createSetPasswordToken(prisma, u.id);
 
-    await consumeResetToken(prisma, token!, "brandnewpass");
+    await consumeResetToken(prisma, token, "brandnewpass");
     expect(await verifyCredentials(prisma, "reset@orbit.so", "brandnewpass")).not.toBeNull();
     // Reuse rejected.
-    await expect(consumeResetToken(prisma, token!, "another")).rejects.toThrow();
+    await expect(consumeResetToken(prisma, token, "another")).rejects.toThrow();
   });
 
   it("rejects an expired token", async () => {
     const u = await makeUser({ email: "expire@orbit.so" });
-    const token = await createResetToken(prisma, "expire@orbit.so");
+    const token = await createSetPasswordToken(prisma, u.id);
     await prisma.passwordResetToken.updateMany({
       where: { userId: u.id },
       data: { expiresAt: new Date(Date.now() - 1000) },
     });
-    await expect(consumeResetToken(prisma, token!, "whatever12")).rejects.toThrow();
+    await expect(consumeResetToken(prisma, token, "whatever12")).rejects.toThrow();
   });
 
-  it("returns null for an unknown email (no account enumeration)", async () => {
-    expect(await createResetToken(prisma, "nobody@orbit.so")).toBeNull();
+  it("never reactivates a suspended account, suspended customer or inactive employee; the token stays unused", async () => {
+    const suspended = await makeUser({ email: "suspended@orbit.so", status: "SUSPENDED" });
+    const customer = await prisma.customer.create({ data: { ref: "OR-3999", name: "C", company: "Co", status: "SUSPENDED" } });
+    const portal = await makeUser({ email: "portal@shop.so", customerId: customer.id });
+    const employee = await prisma.employee.create({ data: { code: "EMP-999", name: "E", department: "OPERATIONS", active: false } });
+    const staff = await prisma.user.create({ data: { email: "staff@orbit.so", status: "ACTIVE", employeeId: employee.id } });
+
+    for (const u of [suspended, portal, staff]) {
+      const token = await createSetPasswordToken(prisma, u.id);
+      await expect(consumeResetToken(prisma, token, "brandnewpass1")).rejects.toThrow();
+      const after = await prisma.user.findUniqueOrThrow({ where: { id: u.id } });
+      expect(after.status).toBe(u.status);
+      expect(after.passwordHash).toBeNull();
+      expect(await prisma.passwordResetToken.count({ where: { userId: u.id, usedAt: { not: null } } })).toBe(0);
+    }
   });
 });
 

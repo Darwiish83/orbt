@@ -30,7 +30,10 @@ the tables:
 - `PORTAL_DATABASE_URL` — `orbit_portal` (customer pages, Row-Level Security)
 - `AUTH_SECRET` — ≥ 32 random chars (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`)
 - `APP_URL` — the public **HTTPS** origin
-- `RESEND_API_KEY`, `EMAIL_FROM` — a verified sending domain
+- `RESEND_API_KEY` (Sending access, limited to `mail.orbitcargo.org`), `EMAIL_DOMAIN=mail.orbitcargo.org`,
+  `EMAIL_FROM=OrbitCargo <noreply@mail.orbitcargo.org>` (must send from `EMAIL_DOMAIN`; no fallback sender)
+- `TRUSTED_PROXY_HOPS=1` — the reverse proxy (step 8); per-IP login and code-request limits read only its `X-Forwarded-For` entry
+- Optional: `OTP_EMAIL_HOURLY_CAP` (default 60 code emails/hour in total), `OTP_IP_MAX_PER_15MIN` (default 10 code requests per IP)
 
 Not on the app server's runtime environment: `MIGRATION_DATABASE_URL`
 (`orbit_owner`, only for the migrate step) and `DATABASE_ADMIN_URL` (server
@@ -77,13 +80,41 @@ yours; never paste passwords into chat or docs.
      Check with `psql … -qAt -f scripts/db-fingerprint.sql` on **both** sides:
      every line must be identical (row counts, file hashes, triggers, policies,
      grants).
-7. **Build and run** — `npm run build`; run `npm start` under systemd as an
-   unprivileged user, `Environment=PORT=3000`, `Restart=always`, listening on
-   localhost only. The app refuses to start on a wrong database role.
+7. **Build and run** — `npm run build`; run the app under systemd as an
+   unprivileged user, `Restart=always`, with this exact start command:
+
+   ```bash
+   npm start -- -H 127.0.0.1 -p 3000
+   ```
+
+   `-H 127.0.0.1` is required: plain `npm start` (`next start`) listens on
+   `0.0.0.0`, every network interface. The app must be reachable **only
+   through the reverse proxy** (step 8). Public access to port 3000 must also
+   be blocked: the step 1 firewall (only SSH, 80 and 443 open) does that, but
+   it is a second layer, not a replacement for the localhost binding — a
+   firewall rule can be changed or lost, the binding keeps the port off the
+   network either way. Check after starting: `ss -ltnp | grep 3000` must show
+   `127.0.0.1:3000`, never `0.0.0.0:3000` or `*:3000`. The app refuses to
+   start on a wrong database role.
 8. **HTTPS** — Caddy or Nginx in front, with a certificate (Caddy does it
-   automatically). The proxy must **overwrite** `X-Forwarded-For` with the real
-   client address (the per-IP login limit reads it).
-9. **Email** — verify the domain in Resend and set `EMAIL_FROM` on it.
+   automatically). The proxy must **overwrite** (or append) `X-Forwarded-For`
+   with the real client address. The per-IP login and code-request limits read
+   only the entry `TRUSTED_PROXY_HOPS` places from the right — the one our
+   proxy wrote — never one a client sent. `TRUSTED_PROXY_HOPS=1` is correct
+   **only** when exactly one trusted reverse proxy sits in front of the app,
+   sanitizes the client IP headers, and is the only way to reach the app (step
+   7). With no proxy, a client could reach the app directly and choose that
+   entry itself; with a second proxy or a CDN in front (e.g. Cloudflare), the
+   value and the proxy's trusted-proxy settings must change first.
+   Nginx: `proxy_set_header X-Forwarded-For $remote_addr;`. Caddy:
+   `reverse_proxy 127.0.0.1:3000` without `trusted_proxies`, so it ignores the
+   client's header and writes the real address. Verify once live: a request
+   sent with `X-Forwarded-For: 6.6.6.6` must be recorded with your real
+   address, not `6.6.6.6`.
+9. **Email** — `mail.orbitcargo.org` is already verified in Resend (DNS at
+   Namecheap: DKIM TXT `resend._domainkey.mail`, CNAMEs `send.mail` and
+   `rsend.mail`, DMARC TXT `_dmarc`). Keep those records; set `EMAIL_FROM` as
+   above and a new Sending-access key for production.
 10. **Backups** — nightly cron of `scripts/backup-db.sh` (owner role),
     encrypted (e.g. `age` / `gpg`) and copied **off the server**; keep e.g. 14
     daily + 12 monthly. Test a restore into a scratch database every month.

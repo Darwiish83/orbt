@@ -1,91 +1,91 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { resetPasswordAction } from "@/app/reset-password/actions";
 import { verifyPassword } from "@/modules/auth/password";
-import { consumeResetToken } from "@/modules/auth/reset";
+import { createSetPasswordToken } from "@/modules/auth/reset";
 import { assertTestDatabase, prisma, resetDb } from "./helpers";
 
 /**
- * Regression for security finding H1: the password-reset email link must be
- * built from APP_URL only. The request below carries forged Host,
- * X-Forwarded-Host and X-Forwarded-Proto headers; if the action ever reads them
- * again, the emailed link would point at the attacker's site and these tests fail.
+ * The one-time set-password link (/reset-password). Since 2026-11-07 its only
+ * source is scripts/make-super-admin.ts --link; the old "email me a reset
+ * link" page (/forgot-password) was removed: it issued tokens for any account,
+ * suspended ones included, accepted weak passwords and left no audit entry.
+ * Forgotten passwords use the emailed-code flow on /login.
  */
-const sent = vi.hoisted(() => [] as { to: string; html: string; text?: string }[]);
-const forged = vi.hoisted(() => ({ value: new Headers() }));
+const EMAIL = "owner@orbit.so";
+const GOOD = "Harbour7Lantern4";
 
-vi.mock("next/headers", () => ({ headers: async () => forged.value }));
-vi.mock("@/lib/email", () => ({
-  emailLayout: (_title: string, body: string) => body,
-  sendEmail: async (m: { to: string; html: string; text?: string }) => {
-    sent.push(m);
-    return { ok: true };
-  },
-}));
-
-const { requestPasswordResetAction } = await import("@/app/forgot-password/actions");
-
-const APP = "https://orbit.example.so";
-const EVIL = "evil.attacker.test";
-const EMAIL = "reset-victim@orbit.so";
-
-const form = (email: string) => {
+const form = (token: string, password: string, confirm = password) => {
   const f = new FormData();
-  f.set("email", email);
+  f.set("token", token);
+  f.set("password", password);
+  f.set("confirm", confirm);
   return f;
 };
-const linksIn = (s: string) => s.match(/https?:\/\/[^\s"<>]+/g) ?? [];
 
 beforeAll(() => assertTestDatabase());
-beforeEach(async () => {
-  await resetDb();
-  sent.length = 0;
-  vi.stubEnv("APP_URL", APP);
-  forged.value = new Headers({ host: EVIL, "x-forwarded-host": EVIL, "x-forwarded-proto": "http" });
-  await prisma.user.create({ data: { email: EMAIL, status: "ACTIVE" } });
-});
-afterEach(() => vi.unstubAllEnvs());
+beforeEach(() => resetDb());
 afterAll(() => prisma.$disconnect());
 
-describe("password-reset email link (H1)", () => {
-  it("ignores forged Host / X-Forwarded-Host / X-Forwarded-Proto and uses APP_URL only", async () => {
-    expect(await requestPasswordResetAction({ done: false }, form(EMAIL))).toEqual({ done: true });
-    expect(sent).toHaveLength(1);
-    const mail = sent[0]!;
-    const links = [...linksIn(mail.html), ...linksIn(mail.text ?? "")];
-    expect(links.length).toBeGreaterThanOrEqual(2); // the button and the plain-text link
-    for (const l of links) {
-      expect(new URL(l).origin).toBe(APP);
-      expect(new URL(l).pathname).toBe("/reset-password");
+describe("/reset-password (one-time set-password link)", () => {
+  it("applies the password rules and keeps the token usable after a refusal", async () => {
+    const u = await prisma.user.create({ data: { email: EMAIL, status: "INVITED" } });
+    const token = await createSetPasswordToken(prisma, u.id);
+    for (const weak of ["password", "short1", "onlyletterslong", "owner1234567"]) {
+      const r = await resetPasswordAction({ error: null }, form(token, weak));
+      expect(r.ok).toBeFalsy();
+      expect(r.error).toBeTruthy();
     }
-    expect(mail.html + (mail.text ?? "")).not.toContain(EVIL);
+    expect((await resetPasswordAction({ error: null }, form(token, GOOD, GOOD + "x"))).ok).toBeFalsy();
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).passwordHash).toBeNull();
+    expect((await resetPasswordAction({ error: null }, form(token, GOOD))).ok).toBe(true);
   });
 
-  it("only the forwarded host is forged: still APP_URL", async () => {
-    forged.value = new Headers({ host: "orbit.example.so", "x-forwarded-host": EVIL });
-    await requestPasswordResetAction({ done: false }, form(EMAIL));
-    expect(linksIn(sent[0]!.html).every((l) => new URL(l).origin === APP)).toBe(true);
-    expect(sent[0]!.html).not.toContain(EVIL);
+  it("sets the password once, activates the account, ends old sessions and writes an audit entry", async () => {
+    const u = await prisma.user.create({ data: { email: EMAIL, status: "INVITED" } });
+    const token = await createSetPasswordToken(prisma, u.id);
+    expect(await resetPasswordAction({ error: null }, form(token, GOOD))).toEqual({ error: null, ok: true });
+    const after = await prisma.user.findUniqueOrThrow({ where: { id: u.id } });
+    expect(after.status).toBe("ACTIVE");
+    expect(after.sessionEpoch).toBeGreaterThan(u.sessionEpoch);
+    expect(await verifyPassword(after.passwordHash!, GOOD)).toBe(true);
+    expect(await prisma.auditEvent.count({ where: { action: "auth.password_set", entityId: u.id } })).toBe(1);
+    // Single use.
+    expect((await resetPasswordAction({ error: null }, form(token, "Another9Password2"))).ok).toBeFalsy();
   });
 
-  it("the emailed link carries a real, single-use token that resets the password", async () => {
-    await requestPasswordResetAction({ done: false }, form(EMAIL));
-    const token = new URL(linksIn(sent[0]!.text ?? "")[0]!).searchParams.get("token")!;
-    await consumeResetToken(prisma, token, "NewPassw0rd!x");
-    const u = await prisma.user.findUniqueOrThrow({ where: { email: EMAIL } });
-    expect(await verifyPassword(u.passwordHash!, "NewPassw0rd!x")).toBe(true);
-    await expect(consumeResetToken(prisma, token, "Another0ne!x")).rejects.toThrow();
+  it("never reactivates a suspended account", async () => {
+    const u = await prisma.user.create({ data: { email: EMAIL, status: "SUSPENDED" } });
+    const token = await createSetPasswordToken(prisma, u.id);
+    const r = await resetPasswordAction({ error: null }, form(token, GOOD));
+    expect(r.ok).toBeFalsy();
+    const after = await prisma.user.findUniqueOrThrow({ where: { id: u.id } });
+    expect([after.status, after.passwordHash]).toEqual(["SUSPENDED", null]);
   });
 
-  it("without a valid APP_URL in production, no email goes out and nothing is revealed", async () => {
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("APP_URL", "");
-    expect(await requestPasswordResetAction({ done: false }, form(EMAIL))).toEqual({ done: true });
-    vi.stubEnv("APP_URL", "http://orbit.example.so"); // not HTTPS
-    expect(await requestPasswordResetAction({ done: false }, form(EMAIL))).toEqual({ done: true });
-    expect(sent).toHaveLength(0);
+  it("refuses a missing or unknown token", async () => {
+    expect((await resetPasswordAction({ error: null }, form("", GOOD))).ok).toBeFalsy();
+    expect((await resetPasswordAction({ error: null }, form("not-a-real-token", GOOD))).ok).toBeFalsy();
   });
+});
 
-  it("an unknown email gets the same answer and no email", async () => {
-    expect(await requestPasswordResetAction({ done: false }, form("nobody@orbit.so"))).toEqual({ done: true });
-    expect(sent).toHaveLength(0);
+describe("no 'email me a reset link' flow", () => {
+  it("the /forgot-password route is gone and nothing else mails a set-password link", () => {
+    expect(existsSync(join(process.cwd(), "src/app/forgot-password"))).toBe(false);
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.(ts|tsx)$/.test(name)) files.push(p);
+      }
+    };
+    walk(join(process.cwd(), "src"));
+    const offenders = files.filter((f) => {
+      const s = readFileSync(f, "utf8");
+      return /createResetToken|passwordResetUrl|\/forgot-password/.test(s) && !f.endsWith(join("lib", "appUrl.ts"));
+    });
+    expect(offenders).toEqual([]);
   });
 });

@@ -3,8 +3,10 @@ import { Resend } from "resend";
 import { logger } from "./logger";
 
 const apiKey = process.env.RESEND_API_KEY;
-const FROM = process.env.EMAIL_FROM || "OrbitCargo <onboarding@resend.dev>";
-const resend = apiKey ? new Resend(apiKey) : null;
+// Production must name its own verified sender (checked at boot by src/lib/envSchema.ts);
+// only development may fall back to Resend's shared test sender.
+const FROM = process.env.EMAIL_FROM?.trim() || (process.env.NODE_ENV === "production" ? "" : "OrbitCargo <onboarding@resend.dev>");
+const resend = apiKey && FROM ? new Resend(apiKey) : null;
 
 export interface SendEmailInput {
   to: string;

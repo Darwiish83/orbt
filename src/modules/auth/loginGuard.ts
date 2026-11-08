@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import type { PrismaClient } from "@prisma/client";
 import { RateLimitError } from "@/lib/errors";
 import { assertNotRateLimited, recordAttempt } from "./rateLimit";
@@ -9,7 +10,8 @@ import { assertNotRateLimited, recordAttempt } from "./rateLimit";
  *
  *  1. Per ID (Employee ID / Customer Reference): 5 failures / 15 min.
  *  2. Per email: 5 failures / 15 min (one email tried against many IDs).
- *  3. Per IP address: 20 failures / 15 min (spraying many accounts).
+ *  3. Per IP address: 20 failures / 15 min (spraying many accounts), using
+ *     the address from our trusted proxy only (clientIp).
  *  4. Account lockout: 10 failures within an hour locks that account for
  *     30 minutes, whoever is trying and from wherever (User.lockedUntil).
  */
@@ -28,11 +30,34 @@ export interface LoginTarget {
 
 const lc = (v: string) => v.trim().toLowerCase();
 
-/** First address in X-Forwarded-For / X-Real-IP (set by the reverse proxy in production). */
-export function clientIp(headers: Headers | undefined | null): string | null {
-  const fwd = headers?.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const ip = fwd || headers?.get("x-real-ip")?.trim();
-  return ip && ip.length <= 64 ? ip : null;
+/**
+ * How many reverse proxies we run in front of the app (TRUSTED_PROXY_HOPS).
+ * 0 (the default) means none is trusted. Production requires 1 or more
+ * (src/lib/envSchema.ts): the VPS runs Caddy/Nginx in front of Next.js.
+ */
+export function trustedProxyHops(raw: string | undefined = process.env.TRUSTED_PROXY_HOPS): number {
+  const n = Number(raw ?? 0);
+  return Number.isInteger(n) && n >= 0 && n <= 5 ? n : 0;
+}
+
+/**
+ * The client's address as our own proxy saw it. Everything a client sends in
+ * X-Forwarded-For is under its control except the entries our proxies add on
+ * the right, so only the entry `hops` places from the right is used (the proxy
+ * must append or overwrite it). With no trusted proxy, the headers are ignored
+ * and null is returned: callers then skip per-IP limits rather than trust a
+ * forged address. X-Real-IP is never trusted. Next.js only fills
+ * X-Forwarded-For when it is missing, so it never shifts these positions.
+ */
+export function clientIp(headers: Headers | undefined | null, hops: number = trustedProxyHops()): string | null {
+  if (!headers || hops < 1) return null;
+  const chain = (headers.get("x-forwarded-for") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (chain.length < hops) return null;
+  const ip = chain[chain.length - hops]!;
+  return isIP(ip) ? ip : null;
 }
 
 /** Throws RateLimitError if the ID, the email or the IP is over its limit. */

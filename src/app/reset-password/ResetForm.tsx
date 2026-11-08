@@ -29,7 +29,7 @@ export function ResetForm({ token }: { token: string }) {
   return (
     <form action={action} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <input type="hidden" name="token" value={token} />
-      <Input name="password" type="password" label="New password" autoComplete="new-password" required hint="At least 8 characters" leadingIcon={<Icon name="Lock" size={16} />} />
+      <Input name="password" type="password" label="New password" autoComplete="new-password" required hint="At least 10 characters, with letters and numbers" leadingIcon={<Icon name="Lock" size={16} />} />
       <Input name="confirm" type="password" label="Confirm password" autoComplete="new-password" required leadingIcon={<Icon name="LockKeyhole" size={16} />} />
       {state.error && (
         <div role="alert" style={{ color: "var(--status-danger)", fontSize: 13 }}>

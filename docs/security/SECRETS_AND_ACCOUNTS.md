@@ -83,7 +83,8 @@ Even with the code or the app's own database password, these are refused **by Po
 | Stolen session after a password change or suspension | `sessionEpoch` bump invalidates all sessions. |
 | **No second factor** (ADR-028, owner decision) | Sign-in is ID + email + password. Anyone holding all three can sign in, so: limits per ID / email / IP, 30-minute lockout after 10 failures in an hour, strong-password rules, generic errors. Each person keeps their password only in a password manager and never shares it. |
 | Repo goes public by mistake | Keep `orbt` **private**. Secrets aren't in it anyway, but business rules and security design are. |
-| Email deliverability | `onboarding@resend.dev` only delivers to the Resend account owner. **Before go-live**, verify the company domain in Resend and set `EMAIL_FROM` to it, otherwise customers and staff won't get codes. |
+| Forgotten passwords | Only the emailed one-time code on /login (customers: Reference + phone + email; staff: Employee ID + email). The old `/forgot-password` link page was removed on 2026-11-07: it issued links for any account, could reactivate a suspended one, accepted weak passwords and wrote no audit entry. `/reset-password` remains only for the owner's first password (`scripts/make-super-admin.ts --link`) and now uses the same rules, audit and suspension checks as the code flows. |
+| Email deliverability | Done 2026-11-07: `mail.orbitcargo.org` is verified in Resend (region eu-west-1; DKIM TXT and return-path CNAMEs at Namecheap; DMARC `p=none` on `orbitcargo.org`), and `EMAIL_FROM` is `OrbitCargo <noreply@mail.orbitcargo.org>`. Use a **Sending access** key limited to that domain. Raise DMARC to `quarantine` once reports show only Resend sends for the domain. |
 | Dev database admin password is a simple local value | Local Docker only (port 5433, not exposed beyond this PC by default). The app no longer uses it (ADR-029): it only creates roles and takes backups. Production: strong unique admin password, kept off the app server. |
 | The app's own DB password leaks | It is `orbit_runtime`: no DDL, no erasing history, triggers still apply, customer pages use `orbit_portal` under RLS. Rotate with `npx tsx scripts/db-setup-roles.ts --rotate` and restart the app. |
 
@@ -91,8 +92,9 @@ Even with the code or the app's own database password, these are refused **by Po
 
 - [ ] New, random `AUTH_SECRET` (≥ 32 bytes) in the host's secret store. Never reuse dev's.
 - [ ] Run `scripts/db-setup-roles.ts` on the production server with its own admin; the app gets only `DATABASE_URL` (orbit_runtime) and `PORTAL_DATABASE_URL` (orbit_portal) from the secret store; `MIGRATION_DATABASE_URL` only in the deploy step.
-- [ ] Resend domain verified; `EMAIL_FROM` set to it; API key in the secret store.
-- [ ] Reverse proxy sets `X-Forwarded-For` (the per-IP login limit reads it) and strips any value sent by clients.
+- [x] Resend domain verified (`mail.orbitcargo.org`); `EMAIL_FROM` set to it.
+- [ ] Production Resend key (Sending access, this domain only) in the secret store.
+- [ ] Reverse proxy sets `X-Forwarded-For` (the per-IP login and code-request limits read it) and the app runs with `TRUSTED_PROXY_HOPS=1`; the app ignores any address a client sends.
 - [ ] `APP_URL` / `AUTH_URL` = the HTTPS domain.
 - [ ] Test accounts never created in production (no seeding scripts exist for them; E2E uses its own DB).
 - [ ] Backups encrypted and stored off the server (see `docs/deployment/`).

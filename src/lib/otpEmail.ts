@@ -10,10 +10,11 @@ const SUBJECT: Record<OtpPurpose, string> = {
 };
 
 /**
- * Email a one-time code. In local development, when the email can't be sent
- * (no provider, or the provider refuses the address), the code is written to
- * the server log so the flow can be exercised; in production a missing
- * provider is an error, and a code is never a log line.
+ * Email a one-time code. A code is never written to any log, in any
+ * environment: a failed send logs only the address, purpose and provider
+ * reason (sendEmail logs the provider error too). In production a missing
+ * provider is an error. Local flows can be exercised with the verified domain,
+ * or in tests with an injected sender.
  */
 export async function sendOtpEmail(to: string, code: string, purpose: OtpPurpose): Promise<void> {
   const result = await sendEmail({
@@ -28,11 +29,8 @@ export async function sendOtpEmail(to: string, code: string, purpose: OtpPurpose
     text: `Your Orbit verification code is ${code}. It expires in 10 minutes.`,
   });
   if (result.ok) return;
-  if (process.env.NODE_ENV === "production") {
-    if (result.error === "email-not-configured") throw new Error("Email provider is not configured");
-    return;
+  if (process.env.NODE_ENV === "production" && result.error === "email-not-configured") {
+    throw new Error("Email provider is not configured");
   }
-  // Local development only: also when the provider refuses the address (e.g. a
-  // Resend test account can only mail its owner), so sign-in can still be tried.
-  logger.warn("DEV ONLY — verification code (email not sent)", { to, purpose, reason: result.error, devCode: code });
+  logger.warn("verification code email not sent", { to, purpose, reason: result.error });
 }

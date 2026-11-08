@@ -34,7 +34,7 @@ A **test database** is provisioned per run (migrated, seeded only with **clearly
 - **Uploads** — invalid type, oversized, and content-mismatched uploads rejected; path traversal / unsafe filenames neutralised; download authz enforced.
 - **Malformed input / injection** — Zod rejects malformed input; Prisma parameterization prevents SQL injection; no XSS via rendered fields.
 - **Financial correctness** — decimal rounding, partial payments, overpayment, allocation, balance = total − allocated; no float drift; currencies never silently mixed.
-- **Session & reset** — session invalidation on logout/privilege change; password-reset token is single-use and expires (reuse rejected).
+- **Session & reset** — session invalidation on logout/privilege change; set-password tokens are single-use and expire (reuse rejected), are refused for a suspended account / suspended customer / inactive employee without being spent, and every password set goes through the password rules and the audit log. There is no "email me a reset link" flow (removed 2026-11-07); forgotten passwords use the emailed code on /login.
 - **Failure handling** — DB transaction rollback on mid-operation failure leaves no partial financial/shipment state.
 
 ## 3. Visual-regression approach (preserving the approved design)

@@ -1,9 +1,11 @@
 /**
  * Minimal structured logger with sensitive-data redaction. Any object key that
  * looks like a secret (password, token, secret, key, hash, authorization,
- * cookie, session) has its value replaced before logging, at any nesting depth.
+ * cookie, session, code — one-time codes) has its value replaced before
+ * logging, at any nesting depth. Messages are never redacted: never put a
+ * secret in one.
  */
-const SENSITIVE_KEY = /pass(word)?|secret|token|authorization|cookie|hash|apikey|api[_-]?key|sessionepoch|credential/i;
+const SENSITIVE_KEY = /pass(word)?|secret|token|authorization|cookie|hash|apikey|api[_-]?key|sessionepoch|credential|code|otp/i;
 const MAX_DEPTH = 6;
 
 export function redact(value: unknown, depth = 0): unknown {

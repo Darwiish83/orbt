@@ -1,12 +1,13 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { ValidationError } from "@/lib/errors";
+import { captureError } from "@/lib/logger";
 import { logAudit } from "@/modules/audit/log";
 import { nextCustomerRef } from "@/modules/customers/ref";
 import { PHONE_REQUIRED, PHONE_TAKEN } from "@/modules/customers/phone";
 import { assertUniqueContact, requireSomaliPhone, somaliPhoneKey } from "@/modules/customers/service";
 import { assertNotRateLimited, recordAttempt } from "./rateLimit";
-import { issueOtp, verifyOtp, type OtpSender } from "./otp";
+import { issueOtp, OtpEmailCapError, reserveOtpRequest, verifyOtp, type OtpSender } from "./otp";
 import { assertStrongPassword } from "./passwordPolicy";
 import { consumeResetToken, createSetPasswordToken, peekResetToken } from "./reset";
 
@@ -23,12 +24,37 @@ import { consumeResetToken, createSetPasswordToken, peekResetToken } from "./res
  *
  * Requests never reveal whether the details matched (no account enumeration):
  * they always "succeed"; a code is only sent when everything matches, and
- * mismatches count towards the rate limit.
+ * mismatches count towards the rate limit. Every well-formed request also
+ * counts against the client IP (`ip`, from our trusted proxy) before any
+ * matching, so that limit answers the same either way.
  */
 
 const norm = (v: string) => v.trim().toUpperCase();
 const lower = (v: string) => v.trim().toLowerCase();
 const emailSchema = z.string().trim().toLowerCase().email().max(254);
+
+/**
+ * Issue and send a code for a request whose details matched. When the hourly
+ * cap on all code emails is reached, nothing is sent and the caller still
+ * answers as usual, so the cap can't be used to tell matching details apart.
+ */
+async function issueAndSendQuietly(
+  db: PrismaClient,
+  input: Parameters<typeof issueOtp>[1],
+  send: OtpSender,
+): Promise<void> {
+  let code: string;
+  try {
+    ({ code } = await issueOtp(db, input));
+  } catch (e) {
+    if (e instanceof OtpEmailCapError) {
+      captureError(e, { area: "otp", purpose: input.purpose });
+      return;
+    }
+    throw e;
+  }
+  await send(lower(input.email), code, input.purpose);
+}
 
 // ------------------------------------------------- customer: first login / forgot
 
@@ -36,6 +62,7 @@ export async function requestCustomerAccess(
   db: PrismaClient,
   input: { reference: string; phone: string; email: string },
   send: OtpSender,
+  ip: string | null = null,
 ): Promise<void> {
   const reference = norm(input.reference);
   const email = emailSchema.safeParse(input.email);
@@ -45,6 +72,7 @@ export async function requestCustomerAccess(
   if (!somaliPhoneKey(input.phone)) {
     throw new ValidationError(PHONE_REQUIRED);
   }
+  await reserveOtpRequest(db, ip);
   await assertNotRateLimited(db, reference, "otp");
 
   const customer = await db.customer.findFirst({
@@ -67,8 +95,7 @@ export async function requestCustomerAccess(
   const user =
     customer.user ??
     (await db.user.create({ data: { email: email.data, status: "INVITED", customerId: customer.id } }));
-  const { code } = await issueOtp(db, { purpose: "CUSTOMER_ACCESS", email: email.data, userId: user.id });
-  await send(email.data, code, "CUSTOMER_ACCESS");
+  await issueAndSendQuietly(db, { purpose: "CUSTOMER_ACCESS", email: email.data, userId: user.id }, send);
 }
 
 /** Verify the code; returns a short-lived set-password token. */
@@ -102,11 +129,13 @@ async function assertSignupContactFree(db: Parameters<typeof assertUniqueContact
   }
 }
 
-export async function startCustomerSignup(db: PrismaClient, input: SignupInput, send: OtpSender): Promise<void> {
+/** Sign-up reveals registered emails/phones by design (owner request), so a reached hourly cap is reported as "too many attempts". */
+export async function startCustomerSignup(db: PrismaClient, input: SignupInput, send: OtpSender, ip: string | null = null): Promise<void> {
   const parsed = signupSchema.safeParse(input);
   if (!parsed.success) throw new ValidationError("Please fill in all required fields");
   const d = parsed.data;
   const { key: phoneKey } = requireSomaliPhone(d.phone);
+  await reserveOtpRequest(db, ip);
   await assertSignupContactFree(db, d.email, phoneKey);
   if (await db.user.findUnique({ where: { email: d.email }, select: { id: true } })) throw new ValidationError(EMAIL_TAKEN);
 
@@ -184,12 +213,14 @@ export async function requestStaffSetup(
   db: PrismaClient,
   input: { employeeId: string; email: string },
   send: OtpSender,
+  ip: string | null = null,
 ): Promise<void> {
   const employeeId = norm(input.employeeId);
   const email = emailSchema.safeParse(input.email);
   if (!/^EMP-[A-Z0-9]+$/.test(employeeId) || !email.success) {
     throw new ValidationError("Enter your Employee ID and email");
   }
+  await reserveOtpRequest(db, ip);
   await assertNotRateLimited(db, employeeId, "otp");
 
   const employee = await db.employee.findFirst({
@@ -203,8 +234,7 @@ export async function requestStaffSetup(
   await recordAttempt(db, { identifier: employeeId, kind: "otp", success: matches });
   if (!matches) return;
 
-  const { code } = await issueOtp(db, { purpose: "STAFF_SETUP", email: email.data, userId: user.id });
-  await send(email.data, code, "STAFF_SETUP");
+  await issueAndSendQuietly(db, { purpose: "STAFF_SETUP", email: email.data, userId: user.id }, send);
 }
 
 export async function verifyStaffSetup(db: PrismaClient, input: { email: string; code: string }): Promise<string> {

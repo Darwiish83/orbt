@@ -10,6 +10,8 @@ import { RateLimitError } from "@/lib/errors";
  * tracked for Phase 9.
  */
 export type AttemptKind = "login" | "reset" | "otp" | "accounting_pin" | "password_change";
+// "otp_request" rows (one per code request, by client IP) are written by
+// reserveOtpRequest in ./otp.ts.
 
 const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const MAX_FAILURES = 5;
