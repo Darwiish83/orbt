@@ -9,6 +9,11 @@ import { e2eEnv } from "./tests/e2e/env";
 // E2E_PORT lets the suite run while another dev server holds :3100; a
 // non-default port also gets its own build dir (NEXT_DIST_DIR) to avoid sharing .next.
 const PORT = Number(process.env.E2E_PORT ?? 3100);
+// The test server listens on the loopback address only, never on Wi-Fi or any
+// other network interface. The literal IPv4 address (not "localhost") is used
+// everywhere: on Windows "localhost" resolves to ::1 first, where nothing listens.
+const HOST = "127.0.0.1";
+const ORIGIN = `http://${HOST}:${PORT}`;
 // The suite has its own database (documents are stored in it, ADR-030): test
 // accounts and uploads never land in the real development data.
 // Same least-privilege roles as production (ADR-029): the app as orbit_runtime,
@@ -31,7 +36,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? "github" : "list",
   use: {
-    baseURL: `http://localhost:${PORT}`,
+    baseURL: ORIGIN,
     trace: "on-first-retry",
   },
   projects: [
@@ -43,13 +48,13 @@ export default defineConfig({
   webServer: {
     // Dev server on a dedicated port (development mode → HTTP-friendly cookies,
     // no production boot-validation). Serial workers keep first-compile stable.
-    command: `npm run dev -- -p ${PORT}`,
+    command: `npm run dev -- -H ${HOST} -p ${PORT}`,
     env: {
       DATABASE_URL: E2E_DATABASE_URL,
       PORTAL_DATABASE_URL: E2E_PORTAL_DATABASE_URL,
       ...(PORT === 3100 ? {} : { NEXT_DIST_DIR: ".next-e2e" }),
     },
-    url: `http://localhost:${PORT}`,
+    url: ORIGIN,
     reuseExistingServer: false,
     timeout: 180_000,
   },
