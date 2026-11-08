@@ -30,6 +30,11 @@ the tables:
 - `PORTAL_DATABASE_URL` — `orbit_portal` (customer pages, Row-Level Security)
 - `AUTH_SECRET` — ≥ 32 random chars (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`)
 - `APP_URL` — the public **HTTPS** origin
+- `AUTH_URL` — the same public HTTPS origin as `APP_URL` (e.g. `https://orbitcargo.org`).
+  Required behind the proxy: without it, the sign-in redirect for a protected page
+  is built from the server's own address and sends visitors to
+  `https://localhost:3000/login` (verified on a production build). Not yet checked
+  at boot — set it by hand.
 - `RESEND_API_KEY` (Sending access, limited to `mail.orbitcargo.org`), `EMAIL_DOMAIN=mail.orbitcargo.org`,
   `EMAIL_FROM=OrbitCargo <noreply@mail.orbitcargo.org>` (must send from `EMAIL_DOMAIN`; no fallback sender)
 - `TRUSTED_PROXY_HOPS=1` — the reverse proxy (step 8); per-IP login and code-request limits read only its `X-Forwarded-For` entry
@@ -57,8 +62,9 @@ yours; never paste passwords into chat or docs.
    (deploy key, read-only), `npm ci`, `npx prisma generate`.
 4. **Secrets** — create `.env` (`chmod 600`) with
    `DATABASE_URL=postgresql://postgres:<admin password>@localhost:5432/orbitcargo?schema=public`,
-   a new `AUTH_SECRET`, `APP_URL=https://<your domain>`, `NODE_ENV=production`,
-   `RESEND_API_KEY`, `EMAIL_FROM`.
+   a new `AUTH_SECRET`, `APP_URL=https://<your domain>`,
+   `AUTH_URL=https://<your domain>`, `NODE_ENV=production`,
+   `RESEND_API_KEY`, `EMAIL_DOMAIN`, `EMAIL_FROM`, `TRUSTED_PROXY_HOPS=1`.
 5. **Roles** — `npx tsx scripts/db-setup-roles.ts`. It keeps the admin URL as
    `DATABASE_ADMIN_URL` and writes `DATABASE_URL` (runtime),
    `PORTAL_DATABASE_URL` and `MIGRATION_DATABASE_URL` with new random
@@ -80,15 +86,36 @@ yours; never paste passwords into chat or docs.
      Check with `psql … -qAt -f scripts/db-fingerprint.sql` on **both** sides:
      every line must be identical (row counts, file hashes, triggers, policies,
      grants).
-7. **Build and run** — `npm run build`; run the app under systemd as an
-   unprivileged user, `Restart=always`, with this exact start command:
+7. **Build and run** — the app is built as a standalone server
+   (`output: "standalone"` in `next.config.mjs`); `npm start` (`next start`)
+   is not the supported way to run that build. Build, then copy the static
+   files into it — the build does not, and without them every page loads with
+   no JavaScript or styles (verified: `/_next/static/…` returns 404):
 
    ```bash
-   npm start -- -H 127.0.0.1 -p 3000
+   npm run build
    ```
 
-   `-H 127.0.0.1` is required: plain `npm start` (`next start`) listens on
-   `0.0.0.0`, every network interface. The app must be reachable **only
+   ```bash
+   cp -r public .next/standalone/ && cp -r .next/static .next/standalone/.next/
+   ```
+
+   The build also copies `.env` into `.next/standalone/.env`, and every build
+   writes it again: after each build keep both owned by the service user and
+   private (`chmod 600 .env .next/standalone/.env`). Run the app under systemd as an
+   unprivileged user, `Restart=always`, in the project folder:
+
+   ```ini
+   WorkingDirectory=/opt/orbitcargo/app
+   EnvironmentFile=/opt/orbitcargo/app/.env
+   Environment=HOSTNAME=127.0.0.1 PORT=3000
+   ExecStart=/usr/bin/node .next/standalone/server.js
+   ```
+
+   (Paths are examples; use the clone's folder and `which node`.) Values from
+   `EnvironmentFile` take precedence over the copied `.env`.
+   `HOSTNAME=127.0.0.1` is required: without it the standalone server listens
+   on `0.0.0.0`, every network interface. The app must be reachable **only
    through the reverse proxy** (step 8). Public access to port 3000 must also
    be blocked: the step 1 firewall (only SSH, 80 and 443 open) does that, but
    it is a second layer, not a replacement for the localhost binding — a
@@ -123,7 +150,8 @@ yours; never paste passwords into chat or docs.
 
 Later deploys: `git pull`, `npm ci`, `npx prisma generate`, back up,
 `npx prisma migrate deploy` (as owner via `MIGRATION_DATABASE_URL`),
-`npm run build`, restart the service.
+`npm run build`, copy `public` and `.next/static` into `.next/standalone`
+and `chmod 600` its `.env` (step 7), restart the service.
 
 ## Containers (alternative)
 
