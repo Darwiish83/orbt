@@ -35,7 +35,7 @@ The DS SPA demonstrates the **exact anti-patterns** to eliminate:
 
 ### Spoofing (identity)
 - **Threats:** credential stuffing, weak passwords, session hijack/fixation, reset-token reuse.
-- **Mitigations:** Auth.js server sessions; **Argon2id** (or scrypt/bcrypt with strong params) password hashing; password policy; **secure, `HttpOnly`, `SameSite`, `Secure` session cookies**; session **rotation on login/privilege change** and invalidation on logout/reset; password reset via **cryptographically random, hashed, expiring, single-use** tokens; rate limiting + lockout/backoff on login & reset; **MFA for privileged staff** (or documented gap + rollout plan).
+- **Mitigations:** Auth.js server sessions; **Argon2id** (or scrypt/bcrypt with strong params) password hashing; password policy; **secure, `HttpOnly`, `SameSite`, `Secure` session cookies**; session **rotation on login/privilege change** and invalidation on logout/reset; password reset via **cryptographically random, hashed, expiring, single-use** tokens; rate limiting on login & reset, scoped per client IP (no account-wide lockout, which anyone knowing an ID could trigger — M3); **MFA for privileged staff** (or documented gap + rollout plan).
 
 ### Tampering (data integrity)
 - **Threats:** forged totals from client, parameter tampering, mass assignment, arbitrary shipment-status changes, duplicate financial postings.

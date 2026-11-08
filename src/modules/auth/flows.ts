@@ -73,7 +73,8 @@ export async function requestCustomerAccess(
     throw new ValidationError(PHONE_REQUIRED);
   }
   await reserveOtpRequest(db, ip);
-  await assertNotRateLimited(db, reference, "otp");
+  // Per IP: a stranger typing this Reference must not block the real customer (M3).
+  await assertNotRateLimited(db, reference, "otp", ip);
 
   const customer = await db.customer.findFirst({
     where: { ref: { equals: reference, mode: "insensitive" } },
@@ -88,7 +89,7 @@ export async function requestCustomerAccess(
     customer.phoneKey === somaliPhoneKey(input.phone) &&
     (!customer.user || (customer.user.email === email.data && customer.user.status !== "SUSPENDED"));
 
-  await recordAttempt(db, { identifier: reference, kind: "otp", success: matches });
+  await recordAttempt(db, { identifier: reference, ip, kind: "otp", success: matches });
   if (!matches) return;
 
   // First login: create the portal account (no password yet).
@@ -221,7 +222,8 @@ export async function requestStaffSetup(
     throw new ValidationError("Enter your Employee ID and email");
   }
   await reserveOtpRequest(db, ip);
-  await assertNotRateLimited(db, employeeId, "otp");
+  // Per IP: a stranger typing this Employee ID must not block the real person (M3).
+  await assertNotRateLimited(db, employeeId, "otp", ip);
 
   const employee = await db.employee.findFirst({
     where: { code: { equals: employeeId, mode: "insensitive" } },
@@ -231,7 +233,7 @@ export async function requestStaffSetup(
   const matches =
     !!employee && employee.active && !!user && user.email === email.data && !user.customerId && user.status !== "SUSPENDED";
 
-  await recordAttempt(db, { identifier: employeeId, kind: "otp", success: matches });
+  await recordAttempt(db, { identifier: employeeId, ip, kind: "otp", success: matches });
   if (!matches) return;
 
   await issueAndSendQuietly(db, { purpose: "STAFF_SETUP", email: email.data, userId: user.id }, send);
