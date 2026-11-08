@@ -1,3 +1,5 @@
+import { serverActionAllowedOrigins } from "./src/lib/serverActionOrigins.mjs";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -12,12 +14,12 @@ const nextConfig = {
   // Minimal, self-contained production server for containerized deploys.
   output: "standalone",
   experimental: {
-    // Allow Server Actions when the app is reached via a Cloudflare quick
-    // tunnel (dev sharing) in addition to the local origin.
     serverActions: {
       // Announcement images are capped at 2 MB by the service.
       bodySizeLimit: "3mb",
-      allowedOrigins: ["localhost:3100", "*.trycloudflare.com"],
+      // Production: same-origin only. Development also allows the second dev
+      // server and Cloudflare quick tunnels (src/lib/serverActionOrigins.mjs).
+      allowedOrigins: serverActionAllowedOrigins(),
     },
   },
 };
