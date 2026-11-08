@@ -21,9 +21,11 @@ image (`StoredFile`). One backup = everything; one restore = everything.
 ## Required production environment variables
 
 Validated at **boot** (`src/instrumentation.ts` → `src/lib/env.ts`, then
-`src/db/roleCheck.ts`); the process refuses to serve if any is missing/invalid
+`src/db/roleCheck.ts`, run by `src/lib/startup.ts`): if any is missing/invalid
 or if a database connection is a superuser, skips Row-Level Security, or owns
-the tables:
+the tables, the process logs one `[startup] OrbitCargo refused to start: …`
+line (rules only, never values) and **exits with code 1** before answering any
+request, so systemd shows the service as failed (`journalctl -u <service>`):
 
 - `NODE_ENV=production`
 - `DATABASE_URL` — `orbit_runtime` (the app's least-privilege role)
@@ -33,8 +35,8 @@ the tables:
 - `AUTH_URL` — the same public HTTPS origin as `APP_URL` (e.g. `https://orbitcargo.org`).
   Required behind the proxy: without it, the sign-in redirect for a protected page
   is built from the server's own address and sends visitors to
-  `https://localhost:3000/login` (verified on a production build). Not yet checked
-  at boot — set it by hand.
+  `https://localhost:3000/login` (verified on a production build). Must be the
+  bare origin (no path), HTTPS, not localhost, and the same origin as `APP_URL`.
 - `RESEND_API_KEY` (Sending access, limited to `mail.orbitcargo.org`), `EMAIL_DOMAIN=mail.orbitcargo.org`,
   `EMAIL_FROM=OrbitCargo <noreply@mail.orbitcargo.org>` (must send from `EMAIL_DOMAIN`; no fallback sender)
 - `TRUSTED_PROXY_HOPS=1` — the reverse proxy (step 8); per-IP login and code-request limits read only its `X-Forwarded-For` entry
@@ -122,7 +124,8 @@ yours; never paste passwords into chat or docs.
    firewall rule can be changed or lost, the binding keeps the port off the
    network either way. Check after starting: `ss -ltnp | grep 3000` must show
    `127.0.0.1:3000`, never `0.0.0.0:3000` or `*:3000`. The app refuses to
-   start on a wrong database role.
+   start (exit code 1) on an invalid configuration or a wrong database role;
+   `systemctl status` then shows it failing and `journalctl` shows the rule.
 8. **HTTPS** — Caddy or Nginx in front, with a certificate (Caddy does it
    automatically). The proxy must **overwrite** (or append) `X-Forwarded-For`
    with the real client address. The per-IP login and code-request limits read

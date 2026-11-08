@@ -4,8 +4,8 @@
  * X-Forwarded-Host, which whoever sends the request controls (an attacker
  * could make a genuine email point at their own site, with a valid token).
  *
- * Production requires an HTTPS APP_URL (also enforced at boot by src/lib/env.ts);
- * development falls back to the same default as env.ts.
+ * Production requires a public HTTPS APP_URL (also enforced at boot by
+ * src/lib/env.ts) and has no fallback; only development falls back to localhost.
  */
 export function trustedAppOrigin(raw: string | undefined = process.env.APP_URL, nodeEnv: string | undefined = process.env.NODE_ENV): string {
   const production = nodeEnv === "production";

@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { ConfigError } from "@/lib/configError";
 
 /**
  * Production boot guard (ADR-029/030): the app must never run as a database
@@ -13,13 +14,13 @@ export async function assertLeastPrivilege(db: PrismaClient, label: string): Pro
            (SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tableowner = current_user)::int AS owned
     FROM pg_roles r WHERE r.rolname = current_user`;
   const me = rows[0];
-  if (!me) throw new Error(`${label}: could not read the database role`);
+  if (!me) throw new ConfigError(`${label}: could not read the database role`);
   const problems = [
     me.rolsuper && "is a superuser",
     me.rolbypassrls && "bypasses Row-Level Security",
     me.owned > 0 && `owns ${me.owned} tables`,
   ].filter(Boolean);
   if (problems.length) {
-    throw new Error(`${label} connection ${problems.join(", ")}: use the least-privilege role (scripts/db-setup-roles.ts)`);
+    throw new ConfigError(`${label} connection ${problems.join(", ")}: use the least-privilege role (scripts/db-setup-roles.ts)`);
   }
 }
