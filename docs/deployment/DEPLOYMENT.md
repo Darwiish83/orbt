@@ -115,9 +115,11 @@ yours; never paste passwords into chat or docs.
    Namecheap: DKIM TXT `resend._domainkey.mail`, CNAMEs `send.mail` and
    `rsend.mail`, DMARC TXT `_dmarc`). Keep those records; set `EMAIL_FROM` as
    above and a new Sending-access key for production.
-10. **Backups** — nightly cron of `scripts/backup-db.sh` (owner role),
-    encrypted (e.g. `age` / `gpg`) and copied **off the server**; keep e.g. 14
-    daily + 12 monthly. Test a restore into a scratch database every month.
+10. **Backups** — encrypted with `scripts/backup-encrypted.mjs` in host mode
+    (see "Backups & restore" below) and copied **off the server** before any
+    real customer data is accepted. Scheduling (e.g. nightly, 14 daily + 12
+    monthly) is a later step; until then run it daily and before every deploy.
+    Test a restore into a scratch database every month.
 
 Later deploys: `git pull`, `npm ci`, `npx prisma generate`, back up,
 `npx prisma migrate deploy` (as owner via `MIGRATION_DATABASE_URL`),
@@ -144,7 +146,42 @@ created once with `scripts/db-setup-roles.ts` against the `db` service.
 
 ## Backups & restore
 
-- Back up: `MIGRATION_DATABASE_URL=… scripts/backup-db.sh [out.dump]` — data,
+**Encrypted backups (H4).** The server holds only the age **public** key
+(`age1…`); the private key stays offline with the owner (password manager +
+USB). Nothing on the server can decrypt a backup.
+
+- On the VPS (native PostgreSQL; peer authentication as the `postgres` OS
+  user, so no password anywhere). One-time setup: put the public key in
+  `/etc/orbitcargo/backup.pub`; create `/var/backups/orbitcargo` owned by
+  `postgres`, mode `700`; install the age library outside the app, pinned and
+  without install scripts:
+  `sudo npm install --prefix /opt/orbitcargo-tools age-encryption@0.3.1 --ignore-scripts`,
+  plus `/opt/orbitcargo-tools/age.mjs` containing `export * from "age-encryption";`.
+  Then, from the app folder:
+
+  ```bash
+  sudo -u postgres env BACKUP_PG_MODE=host BACKUP_DIR=/var/backups/orbitcargo \
+    BACKUP_AGE_RECIPIENTS_FILE=/etc/orbitcargo/backup.pub \
+    BACKUP_AGE_JS=/opt/orbitcargo-tools/age.mjs node scripts/backup-encrypted.mjs
+  ```
+
+  `pg_dump` streams straight into age encryption: no plaintext dump is ever
+  written. Output: `<db>-<UTC time>.dump.age` + `.manifest.json` (sizes,
+  SHA-256s, table checks, fingerprint, migration head); `last-run.json` says
+  success or failure; any failure exits non-zero and leaves no partial file.
+- Off the server: copy both files to the owner's PC (outside OneDrive, e.g.
+  `C:\OrbitCargo-Backups`), then on the PC, with the private key:
+  `node scripts/backup-verify.mjs <file.dump.age>` (decrypts in memory, checks
+  the manifest) and `node scripts/backup-restore-drill.mjs <file.dump.age>
+  --compare-live` against a copy, or without `--compare-live` (restores into a
+  scratch `orbitcargo_drill_<time>` database, checks every table, stored file,
+  trigger, policy and grant, then drops it).
+- Verified 2026-11-08 (dev, disposable database): host-mode and Docker-mode
+  backups both decrypted, matched their manifests, and restored to an
+  identical copy (all 50 tables' content, 16 stored files, 26 triggers, 39
+  policies, 540 grants, 34 migrations).
+- Plain dump (legacy, unencrypted — only for a one-off move between machines):
+  `MIGRATION_DATABASE_URL=… scripts/backup-db.sh [out.dump]` — data,
   documents and images, grants and Row-Level Security in one file.
 - Restore: into a **fresh** database prepared with `scripts/db-setup-roles.ts`:
   `MIGRATION_DATABASE_URL=<fresh-db owner URL> scripts/restore-db.sh out.dump`.
