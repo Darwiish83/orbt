@@ -36,8 +36,11 @@ export default defineConfig({
     env: loadEnv(".env.test"),
     testTimeout: 30_000,
     hookTimeout: 30_000,
-    // Single fork: integration tests share one DB and truncate between tests.
+    // One forked worker runs the files one at a time (maxWorkers: 1) and is reused
+    // across files (isolate: false), replacing the old poolOptions `singleFork`: the tests
+    // share one database and truncate it between tests, so no two may run at once.
     pool: "forks",
-    poolOptions: { forks: { singleFork: true } },
+    maxWorkers: 1,
+    isolate: false,
   },
 });

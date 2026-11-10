@@ -46,9 +46,9 @@ jobs:
       - name: Integration tests (as orbit_runtime / orbit_portal)
         run: npm run test:integration
       - run: npm run build
+      # Blocking: a high or critical advisory fails the job (fix or upgrade; never bypass).
       - name: Dependency audit (high severity)
         run: npm audit --audit-level=high
-        continue-on-error: true
 
   e2e:
     runs-on: ubuntu-latest
@@ -78,12 +78,15 @@ jobs:
       # is thrown away afterwards, so nothing needs to live in GitHub Secrets.
       # The database roles get random passwords too (scripts/db-setup-roles.ts);
       # global-setup migrates as orbit_owner and the app runs as orbit_runtime.
+      # E2E_AUTH_SECRET signs the E2E dev server's sessions (playwright.config.ts
+      # passes it as AUTH_SECRET); 32 random bytes, hex so it needs no quoting.
       - name: Per-run random secrets and database roles
         run: |
           P1=$(openssl rand -base64 24); P2=$(openssl rand -base64 24)
-          echo "::add-mask::$P1"; echo "::add-mask::$P2"
+          E2E_AUTH_SECRET=$(openssl rand -hex 32)
+          echo "::add-mask::$P1"; echo "::add-mask::$P2"; echo "::add-mask::$E2E_AUTH_SECRET"
           printf 'DATABASE_URL="%s"\nAUTH_SECRET="%s"\n' "$ADMIN_DATABASE_URL" "$AUTH_SECRET" > .env
-          printf 'E2E_DATABASE_URL="%s"\nE2E_PASSWORD="%s"\nE2E_CUSTOMER_PASSWORD="%s"\n' "$ADMIN_DATABASE_URL" "$P1" "$P2" > .env.test
+          printf 'E2E_DATABASE_URL="%s"\nE2E_PASSWORD="%s"\nE2E_CUSTOMER_PASSWORD="%s"\nE2E_AUTH_SECRET="%s"\n' "$ADMIN_DATABASE_URL" "$P1" "$P2" "$E2E_AUTH_SECRET" > .env.test
           npx tsx scripts/db-setup-roles.ts
       - run: npx playwright install --with-deps chromium
       # Smoke suite only; visual-regression baselines are platform-specific and
