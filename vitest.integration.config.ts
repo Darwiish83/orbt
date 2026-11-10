@@ -38,6 +38,7 @@ export default defineConfig({
     hookTimeout: 30_000,
     // Single fork: integration tests share one DB and truncate between tests.
     pool: "forks",
-    poolOptions: { forks: { singleFork: true } },
+maxWorkers: 1,
+isolate: false,
   },
 });

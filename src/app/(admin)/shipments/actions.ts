@@ -59,7 +59,7 @@ const shipmentForm = z.object({
   shipDate: optDay,
   arrivalDate: optDay,
   awb: text,
-  businessYear: z.coerce.number().int().min(2000).max(2100),
+  businessYear: z.coerce.number<number>().int().min(2000).max(2100),
 });
 export type ShipmentFormValues = z.input<typeof shipmentForm>;
 
