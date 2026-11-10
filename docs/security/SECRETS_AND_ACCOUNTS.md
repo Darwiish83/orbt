@@ -13,8 +13,9 @@
 | Database role passwords (`DATABASE_URL` = orbit_runtime, `PORTAL_DATABASE_URL` = orbit_portal, `MIGRATION_DATABASE_URL` = orbit_owner, `DATABASE_ADMIN_URL` = server admin) | `.env` / `.env.test`, generated randomly by `scripts/db-setup-roles.ts` (never printed). Production → secret store, **different** passwords; the app server gets only the runtime + portal URLs | Git (`.env.example` only has `CHANGE_ME`), chat, logs |
 | `RESEND_API_KEY` (email) | `.env`; production → secret store | Git |
 | E2E test passwords | Locally `.env.test` (random per machine). CI: **random for every run**, masked, thrown away with the CI database. | Code (removed from `tests/e2e/constants.ts`) |
+| `E2E_AUTH_SECRET` (signs the E2E dev server's sessions; `playwright.config.ts` passes it as `AUTH_SECRET`) | Locally `.env.test`, a random 32-byte hex value per machine (`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`). CI: generated with `openssl rand -hex 32` in **every** GitHub Actions run, masked with `::add-mask::`, written only to that run's `.env.test`, never stored in GitHub Secrets. Never reuse a real `AUTH_SECRET`. | Git, code, chat, logs |
 | **Database backups** (`.dump`) | Since ADR-030 a dump holds every customer record **and every uploaded document**: owner-only file (`umask 077`), encrypted when it leaves the server, deleted from laptops after a move | Git, email, chat, shared drives |
-| One-time codes / reset tokens | DB, hashed (HMAC / SHA-256), short-lived, single-use | Logs (except the dev-only `devCode` line when no email provider is set) |
+| One-time codes / reset tokens | DB, hashed (HMAC / SHA-256), short-lived, single-use | Logs, in every environment: a failed code email logs only the address, purpose and provider reason (`src/lib/otpEmail.ts`; the logger also redacts `code`/`otp` fields), and production refuses to run without an email provider |
 
 Templates with placeholders only: `.env.example`, `.env.test.example`.
 

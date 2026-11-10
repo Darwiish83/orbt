@@ -79,19 +79,19 @@ async function shipmentFacts(db: Db, scope: Scope, filters: { mode?: "AIR" | "SE
       const mode = sh.mode as "AIR" | "SEA";
       const collected = sum(sh.invoices.flatMap((i) => i.allocations.filter((a) => !a.payment.reversedAt).map((a) => a.amount)));
       const commission = sum(sh.invoices.map((i) => i.commissionAmount));
-     const origin = (mode === "AIR" ? airOriginSchema : seaOriginSchema).safeParse(sh.costSheet?.origin ?? {});
-const originData = origin.success
-  ? origin.data
-  : mode === "AIR"
-    ? airOriginSchema.parse({})
-    : seaOriginSchema.parse({});
+      const origin = (mode === "AIR" ? airOriginSchema : seaOriginSchema).safeParse(sh.costSheet?.origin ?? {});
+      const originData = origin.success
+        ? origin.data
+        : mode === "AIR"
+          ? airOriginSchema.parse({})
+          : seaOriginSchema.parse({});
 
-const mgq = (mode === "AIR" ? airMgqSchema : seaMgqSchema).safeParse(sh.costSheet?.mgq ?? {});
-const mgqData = mgq.success
-  ? mgq.data
-  : mode === "AIR"
-    ? airMgqSchema.parse({})
-    : seaMgqSchema.parse({});
+      const mgq = (mode === "AIR" ? airMgqSchema : seaMgqSchema).safeParse(sh.costSheet?.mgq ?? {});
+      const mgqData = mgq.success
+        ? mgq.data
+        : mode === "AIR"
+          ? airMgqSchema.parse({})
+          : seaMgqSchema.parse({});
       const row = computeCost(
         {
           mode,
@@ -101,8 +101,8 @@ const mgqData = mgq.success
           collected,
           commission,
         },
-       originData,
-       mgqData,
+        originData,
+        mgqData,
         splitFor(splits, sh.originCountry, mode),
       );
       const paid = (st: CostStage) => sum(sh.cashOuts.filter((o) => o.stage === st).map((o) => o.amount));

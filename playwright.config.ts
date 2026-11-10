@@ -52,7 +52,7 @@ export default defineConfig({
     env: {
       DATABASE_URL: E2E_DATABASE_URL,
       PORTAL_DATABASE_URL: E2E_PORTAL_DATABASE_URL,
-        AUTH_SECRET: e2eEnv("E2E_AUTH_SECRET"),
+      AUTH_SECRET: e2eEnv("E2E_AUTH_SECRET"),
       ...(PORT === 3100 ? {} : { NEXT_DIST_DIR: ".next-e2e" }),
     },
     url: ORIGIN,
